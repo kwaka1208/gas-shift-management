@@ -107,16 +107,28 @@ function constantTimeEquals_(a, b) {
 }
 
 /**
+ * Webアプリの絶対URL。取得できなければ空文字。
+ *
+ * **画面から画面へのリンクは、必ずこの絶対URLで組み立てること。**
+ * HtmlService の画面は iframe（サンドボックス）の中で動くため、`?t=...` のような
+ * 相対URLは googleusercontent.com のサンドボックスURLに対して解決されてしまい、
+ * アプリのURLにならない。
+ */
+function webAppUrl_() {
+  try {
+    return ScriptApp.getService().getUrl() || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
  * 各画面のURLを組み立てる。デプロイ前は URL を取得できないため、その旨を返す。
  * @param {string} token 閲覧トークン
  * @param {string=} query 追加のクエリ（例: '&view=entry'）
  */
 function buildViewUrl_(token, query) {
-  try {
-    const base = ScriptApp.getService().getUrl();
-    if (!base) return '(未デプロイのためURLを取得できません)';
-    return base + '?t=' + encodeURIComponent(token) + (query || '');
-  } catch (e) {
-    return '(未デプロイのためURLを取得できません)';
-  }
+  const base = webAppUrl_();
+  if (!base) return '(未デプロイのためURLを取得できません)';
+  return base + '?t=' + encodeURIComponent(token) + (query || '');
 }

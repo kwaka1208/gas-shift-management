@@ -3,10 +3,10 @@
  *
  * 【枠の作られ方は2通りある】
  *
- *   1. 先に枠を作っておく … テンプレート生成・コピー・枠の編集（service_slot.gs）
+ *   1. 先に枠を作っておく … 「既定の枠」（service_slot.gs）
  *   2. **割り当てのときに作る** … 場所と人と時間を選ぶと、その時間の枠ができて人が入る
  *
- * 2 が普段の運用で、1 は「あと2名ほしい」という不足を先に表現したいときに使う。
+ * 2 が普段の運用で、1 は「まだ誰も入っていない枠」を先に置きたいときに使う。
  * どちらも行き着く先は同じ `slots` の1行なので、データの形は変わらない。
  *
  * 同じ日付・場所・開始・終了の枠が既にあれば**それを使い回す**。
@@ -22,8 +22,8 @@
  * 2. **弾くのは「事実として成立しない割り当て」だけにする。**
  *    - 同じ枠への二重割り当て … 弾く
  *    - 同日の重なる枠への割り当て … 弾く（体はひとつしかない）
- *    - 必要人数の超過 … **弾かない。** 予備要員や引き継ぎで一時的に重ねる運用があるため、
- *      書き込みは通し、超過している事実を notice として返して画面に出す
+ *    - 必要人数 … **見ない。** 人数は場所単位で運用する方針にしたため、枠の
+ *      required_count で人数を止めることはしない
  *    - 可用性が枠を覆っていない … **弾かない。** design.md 6.5 の考え方（警告は表示のみ、
  *      自動削除はしない）に合わせ、Phase 4 で `no_availability` 警告として出す
  *
@@ -38,7 +38,7 @@
  * @param {string} slotId
  * @param {string} personId
  * @param {string} operator 操作者名（記名）
- * @return {{ assignment: Object, notice: string }}
+ * @return {{ assignment: Object }}
  */
 function assignData_(slotId, personId, operator) {
   const sid = trimStr_(slotId);
@@ -58,10 +58,9 @@ function assignData_(slotId, personId, operator) {
  * 場所の空いているところをタップしたときと、既存の枠に別の時間で人を入れたいときの
  * 両方から呼ばれる。**呼び出し側は枠があるかどうかを気にしなくてよい。**
  *
- * @param {Object} input date / place_id / start_time / end_time / required_count /
- *                       staff_required / person_id
+ * @param {Object} input date / place_id / start_time / end_time / person_id
  * @param {string} operator 操作者名（記名）
- * @return {{ slot: Object, slotCreated: boolean, assignment: Object, notice: string }}
+ * @return {{ slot: Object, slotCreated: boolean, assignment: Object }}
  */
 function assignToNewSlotData_(input, operator) {
   const payload = input || {};
@@ -77,12 +76,8 @@ function assignToNewSlotData_(input, operator) {
     place_id: payload.place_id,
     start_time: payload.start_time,
     end_time: payload.end_time,
-    // 割り当てから作る枠の必要人数は `_config` の default_slot_required に従う
-    // （既定は1名＝入った人で充足）。画面から変更できる
-    required_count: (payload.required_count === '' || payload.required_count === undefined ||
-      payload.required_count === null)
-      ? getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_REQUIRED, 1)
-      : payload.required_count,
+    // 人数は画面で扱わない（場所単位で管理する方針）。`_config` の既定値を入れておく
+    required_count: getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_REQUIRED, 1),
     staff_required: payload.staff_required,
     note: payload.note
   }, date, placeById, unit, '枠', errors);
@@ -111,7 +106,7 @@ function findOrCreateSlot_(cleaned, operator) {
   })[0];
 
   if (same) {
-    // 既にある枠に入れる。必要人数は勝手に書き換えない（先に立てた計画を尊重する）
+    // 既にある枠にそのまま入れる（同じ時間の枠を二重に作らない）
     return { slot: same, created: false };
   }
 
@@ -119,7 +114,7 @@ function findOrCreateSlot_(cleaned, operator) {
   const placeById = indexById_(readTable_(SHEET_DEFS.PLACES));
   appendLog_(operator, 'create_slot', inserted.id,
     cleaned.date + ' ' + placeName_(placeById, cleaned.place_id) + ' ' +
-    cleaned.start_time + '–' + cleaned.end_time + ' / 必要' + cleaned.required_count + '名');
+    cleaned.start_time + '–' + cleaned.end_time);
 
   return { slot: inserted, created: true };
 }
@@ -205,23 +200,8 @@ function doAssign_(slot, personId, operator) {
       slot_id: slot.id,
       person_id: pid,
       assigned_by: operator
-    },
-    // 超過は許可した上で事実だけ伝える（弾かない）
-    notice: overCapacityNotice_(slot, dayAssignments, placeLabel)
+    }
   };
-}
-
-/**
- * 必要人数を超えたときの知らせ。超過していなければ空文字。
- *
- * ここで数えるのは書き込み前の件数なので、+1 したものが割り当て後の人数になる。
- */
-function overCapacityNotice_(slot, dayAssignments, placeLabel) {
-  const required = Number(slot.required_count) || 0;
-  if (required <= 0) return '';
-  const after = dayAssignments.filter(function (a) { return a.slot_id === slot.id; }).length + 1;
-  if (after <= required) return '';
-  return placeLabel + ' は必要' + required + '名のところ' + after + '名になりました。';
 }
 
 /**
@@ -229,7 +209,7 @@ function overCapacityNotice_(slot, dayAssignments, placeLabel) {
  *
  * 既に無い場合もエラーにしない（冒頭の約束3）。
  * **枠は残す。** 誰もいなくなった枠を自動で消すと、割り当てをやり直すたびに
- * 枠が消えたり生えたりして、先に立てた計画（必要人数）が失われる。
+ * 枠が消えたり生えたりして、先に立てた予定が失われる。
  *
  * @param {string} assignmentId
  * @param {string} operator 操作者名（記名）

@@ -16,16 +16,53 @@ const App = (function () {
   function call(name) {
     const args = Array.prototype.slice.call(arguments, 1);
     return new Promise(function (resolve, reject) {
+      if (!window.google || !google.script || !google.script.run) {
+        // HtmlService の外（ファイルを直接開いた等）。通信の問題ではない
+        reject(new Error('この画面はアプリのURLから開いてください。'));
+        return;
+      }
+
       const runner = google.script.run
         .withSuccessHandler(function (res) {
           if (res && res.ok) resolve(res.data);
           else reject(new Error((res && res.error) || '処理できませんでした。'));
         })
+        /*
+          ここへ来るのは、サーバー側の関数に届かなかったときだけ
+          （api.js の handle_ が例外を捕まえるので、業務エラーは success 側で返る）。
+
+          実際にはデプロイ設定の誤りが最も多い。「電波」とだけ言うと利用者が
+          何度もリロードし続けるので、**原因の見当が付く文言にする。**
+          詳細は console にも出す（利用者には見せないが、問い合わせ時に確認できる）。
+        */
         .withFailureHandler(function (err) {
-          reject(new Error((err && err.message) || '通信に失敗しました。電波の状態を確認してください。'));
+          console.error('[' + name + '] google.script.run failed:', err);
+          const detail = (err && err.message) ? String(err.message).trim() : '';
+          reject(new Error(detail ||
+            'サーバーに接続できませんでした。\n' +
+            '通信状態を確認して、画面を再読み込みしてください。\n' +
+            '何度も出る場合は、配布元にこの画面を見せてください。'));
         });
       runner[name].apply(runner, args);
     });
+  }
+
+  /**
+   * 画面から画面へのリンクURLを組み立てる。
+   *
+   * **必ずこれを使うこと。** HtmlService の画面は iframe（サンドボックス）の中で動くため、
+   * `?t=...` のような相対URLは googleusercontent.com のサンドボックスURLに対して
+   * 解決されてしまい、アプリのURLにならない。サーバーが渡す絶対URLを土台にする。
+   *
+   * @param {Object} params クエリ（値が空のものは付けない）
+   */
+  function appUrl(params) {
+    const q = Object.keys(params || {})
+      .filter(function (k) { return params[k] !== '' && params[k] !== undefined && params[k] !== null; })
+      .map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); })
+      .join('&');
+    // baseUrl が空になるのは未デプロイのときだけ。そのときは相対URLで凌ぐ
+    return (BOOT.baseUrl || '') + '?' + q;
   }
 
   /** HTML エスケープ。テンプレートリテラルに値を差し込む前に必ず通す */
@@ -145,6 +182,7 @@ const App = (function () {
 
   return {
     call: call,
+    appUrl: appUrl,
     esc: esc,
     toMin: toMin,
     toHHMM: toHHMM,

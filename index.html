@@ -32,8 +32,6 @@
     <!-- 管理URL（?view=admin）で開いたときだけ表示される操作列 -->
     <div class="adminBar" id="adminBar" hidden>
       <div class="adminBar__spacer"></div>
-      <!-- 人の空き状況。日付は今見ている日を引き継ぐ（href は script.html が入れる） -->
-      <a class="btn btn--ghost" id="peopleLink" href="#">人の空き状況</a>
       <button type="button" class="btn btn--ghost" id="placesBtn">場所</button>
       <button type="button" class="btn btn--ghost" id="defaultSlotsBtn">既定の枠</button>
     </div>
@@ -45,7 +43,29 @@
 
   <main id="main">
     <div class="loading" id="loading">読み込んでいます…</div>
-    <div id="board" hidden></div>
+
+    <!--
+      同じ日を2つの見方で並べる。
+        上 … 場所ごと（枠が埋まっているか）
+        下 … 人ごと（誰がまだ空いているか）
+      切り替えではなく上下に並べるのは、片方を見ながらもう片方を直す作業だから。
+    -->
+    <div id="sections" hidden>
+      <section class="sec">
+        <h2 class="sec__title">場所ごと</h2>
+        <div id="board"></div>
+      </section>
+
+      <section class="sec">
+        <h2 class="sec__title">人ごと</h2>
+        <p class="legend">
+          <span class="legend__item"><span class="legend__swatch legend__swatch--free"></span>入れる時間</span>
+          <span class="legend__item"><span class="legend__swatch legend__swatch--busy"></span>割り当て済み</span>
+          <span class="legend__item" id="unassignHint" hidden>青い帯をタップすると解除できます</span>
+        </p>
+        <div id="people"></div>
+      </section>
+    </div>
   </main>
 
   <!-- モーダル。中身は script.html が組み立てる -->

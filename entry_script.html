@@ -28,12 +28,10 @@
   // ------------------------------------------------------------ 起動
 
   function boot() {
-    $('f_date').value = BOOT.date || App.todayStr();
-
     call('getBootstrap', state.token).then(function (data) {
       state.config = data.config;
       setupProxyFields();
-      addRangeRow();
+      addDayBlock(BOOT.date || App.todayStr());
       $('loading').hidden = true;
       $('entryForm').hidden = false;
     }).catch(function (e) {
@@ -53,7 +51,96 @@
     $('typeField').hidden = false;
   }
 
-  // ------------------------------------------------------------ 時間帯の行
+  // ------------------------------------------------------- 日付と時間帯
+
+  /*
+    「日付ブロック」の中に「時間帯の行」が並ぶ入れ子。
+      ┌─ 8月10日(土) ──────┐
+      │ 10:00 〜 12:00   × │
+      │ [＋ 時間帯を追加]   │
+      └────────────────────┘
+
+    日ごとに都合が違うのが普通なので、日付を1つ選んで終わりにはしない。
+    ただし**日付を足したときは直前の日の時間帯をそのまま入れる。**
+    同じ時間で通う人が大半なので、既定で埋まっていれば日付を足すだけで済む。
+  */
+
+  const DOW_LABEL = ['日', '月', '火', '水', '木', '金', '土'];
+
+  /**
+   * 日付ブロックを1つ足す。
+   *
+   * @param {string=} date 'YYYY-MM-DD'。省略時は「最後の日の翌日」
+   * @param {Array<{start,end}>=} ranges 省略時は直前の日の時間帯を引き継ぐ
+   */
+  function addDayBlock(date, ranges) {
+    const cfg = state.config;
+    const blocks = $('dayList').children;
+    const last = blocks.length > 0 ? blocks[blocks.length - 1] : null;
+
+    if (!date) {
+      const lastDate = last ? last.querySelector('.dayDate').value : '';
+      date = lastDate ? App.addDays(lastDate, 1) : (BOOT.date || App.todayStr());
+    }
+    // 引き継ぐ時間帯。1つ目のブロックだけは表示時間帯を既定にする
+    if (!ranges) {
+      ranges = last ? readRangesOf(last) : [{ start: cfg.day_start, end: cfg.day_end }];
+      ranges = ranges.filter(function (r) { return r.start && r.end; });
+      if (ranges.length === 0) ranges = [{ start: cfg.day_start, end: cfg.day_end }];
+    }
+
+    const block = document.createElement('div');
+    block.className = 'dayBlock';
+    block.innerHTML =
+      '<div class="dayBlock__head">' +
+        '<input type="date" class="dayDate" value="' + esc(date) + '" aria-label="日付">' +
+        '<span class="dayBlock__dow"></span>' +
+        '<button type="button" class="btn btn--icon dayBlock__del" aria-label="この日を削除">×</button>' +
+      '</div>' +
+      '<div class="rangeList"></div>' +
+      '<div class="rangeActions">' +
+        '<button type="button" class="btn btn--small addRange">＋ 時間帯を追加</button>' +
+        '<button type="button" class="btn btn--small allDay">終日OK</button>' +
+      '</div>';
+
+    $('dayList').appendChild(block);
+
+    const dowEl = block.querySelector('.dayBlock__dow');
+    const updateDow = function () {
+      const v = block.querySelector('.dayDate').value;
+      dowEl.textContent = v ? '(' + DOW_LABEL[App.dowOf(v)] + ')' : '';
+    };
+    block.querySelector('.dayDate').addEventListener('change', updateDow);
+    updateDow();
+
+    block.querySelector('.dayBlock__del').addEventListener('click', function () {
+      block.remove();
+      if ($('dayList').children.length === 0) addDayBlock();
+      updateDayDeleteButtons();
+    });
+
+    block.querySelector('.addRange').addEventListener('click', function () {
+      addRangeRow(block);
+    });
+
+    block.querySelector('.allDay').addEventListener('click', function () {
+      block.querySelector('.rangeList').innerHTML = '';
+      addRangeRow(block, cfg.day_start, cfg.day_end);
+      toast('終日（' + cfg.day_start + '〜' + cfg.day_end + '）を入力しました');
+    });
+
+    ranges.forEach(function (r) { addRangeRow(block, r.start, r.end); });
+    updateDayDeleteButtons();
+    return block;
+  }
+
+  /** 日付ブロックが1つだけのときは削除ボタンを隠す */
+  function updateDayDeleteButtons() {
+    const blocks = $('dayList').children;
+    Array.prototype.forEach.call(blocks, function (b) {
+      b.querySelector('.dayBlock__del').hidden = blocks.length <= 1;
+    });
+  }
 
   /**
    * 時間帯の行を1つ足す。
@@ -61,13 +148,14 @@
    *
    * 時刻はプルダウンではなく、時・分の直接入力（App.timeFields）。
    */
-  function addRangeRow(start, end) {
+  function addRangeRow(block, start, end) {
     const cfg = state.config;
     const dayStart = toMin(cfg.day_start);
     const dayEnd = toMin(cfg.day_end);
-    const rows = $('rangeList').children;
+    const list = block.querySelector('.rangeList');
 
     if (!start) {
+      const rows = list.children;
       const last = rows.length > 0 ? rows[rows.length - 1] : null;
       const lastEnd = last ? App.readTimeFields(last.querySelector('.rangeEnd')) : '';
       const from = lastEnd ? toMin(lastEnd) : dayStart;
@@ -85,8 +173,8 @@
 
     row.querySelector('.rangeRow__del').addEventListener('click', function () {
       row.remove();
-      if ($('rangeList').children.length === 0) addRangeRow();
-      updateDeleteButtons();
+      if (list.children.length === 0) addRangeRow(block);
+      updateDeleteButtons(block);
     });
 
     // 開始を後ろにずらしたら、終了もついてくる（終了 <= 開始 を作らせない）
@@ -100,23 +188,34 @@
       }
     });
 
-    $('rangeList').appendChild(row);
-    updateDeleteButtons();
+    list.appendChild(row);
+    updateDeleteButtons(block);
   }
 
   /** 行が1つだけのときは削除ボタンを隠す（消せない行を押させない） */
-  function updateDeleteButtons() {
-    const rows = $('rangeList').children;
+  function updateDeleteButtons(block) {
+    const rows = block.querySelector('.rangeList').children;
     Array.prototype.forEach.call(rows, function (row) {
       row.querySelector('.rangeRow__del').hidden = rows.length <= 1;
     });
   }
 
-  function readRanges() {
-    return Array.prototype.map.call($('rangeList').children, function (row) {
+  /** 1つの日付ブロックの時間帯を読む */
+  function readRangesOf(block) {
+    return Array.prototype.map.call(block.querySelector('.rangeList').children, function (row) {
       return {
         start: App.readTimeFields(row.querySelector('.rangeStart')),
         end: App.readTimeFields(row.querySelector('.rangeEnd'))
+      };
+    });
+  }
+
+  /** 送信する形（日付と時間帯の配列） */
+  function readDays() {
+    return Array.prototype.map.call($('dayList').children, function (block) {
+      return {
+        date: block.querySelector('.dayDate').value,
+        ranges: readRangesOf(block)
       };
     });
   }
@@ -142,8 +241,7 @@
       name: $('f_name').value,
       contact: $('f_contact').value,
       type: state.proxy ? $('f_type').value : 'volunteer',
-      date: $('f_date').value,
-      ranges: readRanges(),
+      days: readDays(),
       operator: state.proxy && $('f_operator') ? $('f_operator').value : ''
     };
 
@@ -153,32 +251,48 @@
       $('f_name').focus();
       return;
     }
-    if (!payload.date) {
-      showError('日付を選んでください。');
-      $('f_date').focus();
-      return;
-    }
-    const empty = payload.ranges.filter(function (r) { return !r.start || !r.end; });
-    if (empty.length > 0) {
-      showError('入れる時間帯を入力してください（時は0〜23、分は0〜59）。');
-      return;
-    }
-    const bad = payload.ranges.filter(function (r) { return toMin(r.end) <= toMin(r.start); });
-    if (bad.length > 0) {
-      showError('終了時刻は開始時刻より後にしてください。');
+
+    const problem = findInputProblem(payload.days);
+    if (problem) {
+      showError(problem);
       return;
     }
 
     setBusy(true);
     call('submitAvailability', state.token, payload)
       .then(function (data) {
-        showReceipt(data, payload);
+        showReceipt(data);
       })
       .catch(function (e) {
         showError(e.message);
         toast('登録できませんでした', true);
       })
       .then(function () { setBusy(false); });
+  }
+
+  /** 最初に見つかった入力の不備。無ければ null */
+  function findInputProblem(days) {
+    if (days.length === 0) return '入れる日を入力してください。';
+
+    const seen = {};
+    for (let i = 0; i < days.length; i++) {
+      const d = days[i];
+      if (!d.date) return '日付を入力してください。';
+      if (seen[d.date]) return d.date + ' が重複しています。1つにまとめてください。';
+      seen[d.date] = true;
+
+      if (d.ranges.length === 0) return d.date + ' の時間帯を入力してください。';
+      for (let j = 0; j < d.ranges.length; j++) {
+        const r = d.ranges[j];
+        if (!r.start || !r.end) {
+          return d.date + ' の時間帯を入力してください（時は0〜23、分は0〜59）。';
+        }
+        if (toMin(r.end) <= toMin(r.start)) {
+          return d.date + ' は終了時刻を開始時刻より後にしてください。';
+        }
+      }
+    }
+    return null;
   }
 
   function setBusy(on) {
@@ -194,10 +308,20 @@
    * 「送れたのか分からない」が最も多い問い合わせになるため、
    * 何がいつ登録されたのかを画面で確認できるようにする。
    */
-  function showReceipt(data, payload) {
-    const dow = DOW[App.dowOf(data.date)];
-    const list = data.entries.map(function (e) {
-      return '<li>' + esc(e.start_time) + ' 〜 ' + esc(e.end_time) + '</li>';
+  function showReceipt(data) {
+    const days = data.days || [];
+    const merged = days.some(function (d) { return d.entries.length < d.inputCount; });
+    const allKnown = days.every(function (d) { return d.addedCount === 0; });
+
+    const rows = days.map(function (d) {
+      const times = d.entries.map(function (e) {
+        return esc(e.start_time) + ' 〜 ' + esc(e.end_time);
+      }).join('<br>');
+      return '<div class="receipt__day">' +
+        '<div class="receipt__date">' + esc(d.date) +
+          '（' + DOW[App.dowOf(d.date)] + '）</div>' +
+        '<div class="receipt__times">' + times + '</div>' +
+      '</div>';
     }).join('');
 
     $('receipt').innerHTML =
@@ -206,20 +330,15 @@
         '<dl class="receipt__list">' +
           '<dt>お名前</dt><dd>' + esc(data.name) +
             (data.type === 'staff' ? '（職員）' : '') + '</dd>' +
-          '<dt>日付</dt><dd>' + esc(data.date) + '（' + dow + '）</dd>' +
-          '<dt>入れる時間帯</dt><dd><ul class="receipt__times">' + list + '</ul></dd>' +
+          '<dt>入れる日と時間帯（' + days.length + '日）</dt>' +
+          '<dd>' + rows + '</dd>' +
         '</dl>' +
-        (data.entries.length < payload.ranges.length
-          ? '<p class="hint">重なっていた時間帯はひとつにまとめました。</p>'
-          : '') +
-        (data.addedCount === 0
-          ? '<p class="hint">この内容は登録済みでした。二重にはなっていません。</p>'
-          : '') +
+        (merged ? '<p class="hint">重なっていた時間帯はひとつにまとめました。</p>' : '') +
+        (allKnown ? '<p class="hint">この内容は登録済みでした。二重にはなっていません。</p>' : '') +
         '<p class="hint">この画面は控えです。閉じてしまっても登録は残ります。' +
           '変更したいときは、もう一度この画面から登録してください。</p>' +
         '<div class="receipt__actions">' +
-          '<button type="button" class="btn" id="againSameDay">同じ日にもう1つ追加</button>' +
-          '<button type="button" class="btn" id="againNextDay">別の日を登録</button>' +
+          '<button type="button" class="btn" id="againMore">続けて登録する</button>' +
           (state.proxy ? '<button type="button" class="btn" id="againOther">別の人を入力</button>' : '') +
         '</div>' +
       '</div>';
@@ -228,9 +347,10 @@
     $('receipt').hidden = false;
     window.scrollTo(0, 0);
 
-    $('againSameDay').addEventListener('click', function () { backToForm({ keepPerson: true }); });
-    $('againNextDay').addEventListener('click', function () {
-      backToForm({ keepPerson: true, date: App.addDays(data.date, 1) });
+    // 続けて登録するときは、最後に登録した日の翌日から始める
+    const lastDate = days.length > 0 ? days[days.length - 1].date : '';
+    $('againMore').addEventListener('click', function () {
+      backToForm({ keepPerson: true, date: lastDate ? App.addDays(lastDate, 1) : '' });
     });
     if (state.proxy) {
       $('againOther').addEventListener('click', function () { backToForm({ keepPerson: false }); });
@@ -244,10 +364,9 @@
       $('f_contact').value = '';
       if (state.proxy) $('f_type').value = 'volunteer';
     }
-    if (opts.date) $('f_date').value = opts.date;
 
-    $('rangeList').innerHTML = '';
-    addRangeRow();
+    $('dayList').innerHTML = '';
+    addDayBlock(opts.date || '');
     clearError();
 
     $('receipt').hidden = true;
@@ -263,13 +382,8 @@
     submit();
   });
 
-  $('addRange').addEventListener('click', function () { addRangeRow(); });
-
-  $('allDay').addEventListener('click', function () {
-    $('rangeList').innerHTML = '';
-    addRangeRow(state.config.day_start, state.config.day_end);
-    toast('終日（' + state.config.day_start + '〜' + state.config.day_end + '）を入力しました');
-  });
+  // 直前の日の時間帯を引き継いで、日付だけ翌日にする
+  $('addDay').addEventListener('click', function () { addDayBlock(); });
 
   boot();
 })();

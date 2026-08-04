@@ -300,7 +300,20 @@ input[type="date"] {
   text-overflow: ellipsis;
 }
 
-/* ------------------------------------------------ 人の空き状況（people） */
+/* ---------------------------------------------------------------- 節 */
+
+.sec { padding-top: .75rem; }
+.sec + .sec { margin-top: 1.5rem; border-top: 1px solid var(--line); }
+
+.sec__title {
+  margin: 0;
+  padding: 0 var(--gutter);
+  font-size: .8125rem;
+  font-weight: 600;
+  color: var(--fg-weak);
+}
+
+/* ------------------------------------------------ 人ごとの一覧（people） */
 
 /*
   配置表と同じタイムラインの骨組み（.board / .board__row / .board__lanes）を使い、
@@ -311,7 +324,8 @@ input[type="date"] {
   display: flex;
   flex-wrap: wrap;
   gap: .875rem;
-  margin: .5rem 0 0;
+  margin: .25rem 0 0;
+  padding: 0 var(--gutter);
   font-size: .75rem;
   color: var(--fg-weak);
 }
@@ -345,6 +359,10 @@ input[type="date"] {
   flex-basis: 8rem;
   width: 8rem;
 }
+
+/* 解除できることが分かるように（管理URLのときだけ付く） */
+.res__busy--tappable { cursor: pointer; border: none; font-family: inherit; }
+.res__busy--tappable:hover { filter: brightness(1.15); }
 
 /* 1人1行。枠のように段を分ける必要はない（同じ人は同時間に1つしか入らない） */
 .res__lanes { min-height: 2.75rem; }
@@ -646,6 +664,16 @@ input[type="date"] {
 
 .btn--small { min-height: 2rem; padding: .25rem .625rem; font-size: .8125rem; }
 
+/* 枠そのものの編集（パネル上部）。人の出し入れと視覚的に分ける */
+.slotEditActions {
+  display: flex;
+  gap: .5rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid var(--line);
+}
+
+.slotEditActions .btn { flex: 1; }
+
 /* パネルの下に置く副操作（「時間を指定して入れる」） */
 .btn--sub {
   margin-top: 1.25rem;
@@ -695,6 +723,35 @@ input[type="date"] {
   margin-top: 1.5rem;
 }
 
+/*
+  日付ブロック。中に時間帯の行が並ぶ。
+  枠線で囲むのは、どの時間帯がどの日のものかを取り違えさせないため。
+*/
+.dayBlock {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: .625rem;
+  margin-bottom: .625rem;
+}
+
+.dayBlock__head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .5rem;
+}
+
+.dayBlock__head .dayDate { flex: 1 1 auto; min-width: 0; }
+
+.dayBlock__dow {
+  flex: 0 0 auto;
+  font-size: .8125rem;
+  color: var(--fg-weak);
+}
+
+.dayBlock__del { flex: 0 0 auto; color: var(--fg-weak); }
+
 .rangeRow {
   display: flex;
   align-items: center;
@@ -739,8 +796,23 @@ input[type="date"] {
 .receipt__list dt { font-size: .8125rem; color: var(--fg-weak); }
 .receipt__list dd { margin: 0 0 .875rem; font-size: 1.0625rem; }
 
-.receipt__times { list-style: none; margin: 0; padding: 0; }
-.receipt__times li { font-variant-numeric: tabular-nums; }
+/* 控えの日付ごとの明細 */
+.receipt__day {
+  display: flex;
+  gap: .75rem;
+  padding: .375rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.receipt__day:last-child { border-bottom: none; }
+
+.receipt__date { flex: 0 0 8.5rem; font-size: .9375rem; }
+
+.receipt__times {
+  flex: 1 1 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: .9375rem;
+}
 
 .receipt__actions {
   display: flex;

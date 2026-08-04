@@ -19,43 +19,59 @@
  * 重なった行を残すと Phase 3 の候補者計算で同じ人が二重に数えられる。
  */
 
-/** 1回の送信で受け付ける時間帯の上限。誤操作や悪意ある大量送信を止める */
+/** 1日あたりに受け付ける時間帯の上限。誤操作や悪意ある大量送信を止める */
 const MAX_RANGES_PER_SUBMIT = 20;
 
+/** 1回の送信で受け付ける日数の上限 */
+const MAX_DAYS_PER_SUBMIT = 31;
+
 /**
- * 可用性を登録する。
+ * 可用性を登録する。**複数日をまとめて受け取る。**
+ *
+ * 日ごとに送らせると、3日分の応募で3往復することになる。
+ * 応募が集中する時間帯にそれをやると Lock の待ちが積み上がるため、
+ * 1回の呼び出しで全部受ける（gas.md 3.2）。
  *
  * @param {Object} payload
  *   - name {string}     氏名（必須）
  *   - contact {string}  連絡先（任意）
  *   - type {string}     'volunteer' / 'staff'（既定は volunteer）
- *   - date {string}     'YYYY-MM-DD'
- *   - ranges {Array<{start: string, end: string}>} 'HH:mm'
+ *   - days {Array<{date: string, ranges: Array<{start, end}>}>} 日ごとの申告
  *   - operator {string} 代理入力した人の名前（本人入力なら空）
- * @return {{ personId, name, date, entries, addedCount, isNewPerson }}
+ * @return {{ personId, name, type, days, isNewPerson }}
  */
 function submitAvailabilityData_(payload) {
   const input = validateEntryInput_(payload || {});
 
   const person = findOrCreatePerson_(input);
-  const result = addAvailability_(person.id, input.date, input.ranges);
+
+  const days = input.days.map(function (day) {
+    const result = addAvailability_(person.id, day.date, day.ranges);
+    return {
+      date: day.date,
+      entries: result.entries,
+      addedCount: result.addedCount,
+      // 画面に入力した本数。まとまった場合に控えで知らせるために返す
+      inputCount: day.ranges.length
+    };
+  });
 
   appendLog_(
     input.operator || '(本人)',
     'submit_availability',
     person.id,
-    input.date + ' ' + result.entries.map(function (e) {
-      return e.start_time + '-' + e.end_time;
-    }).join(', ')
+    days.map(function (d) {
+      return d.date + ' ' + d.entries.map(function (e) {
+        return e.start_time + '-' + e.end_time;
+      }).join(',');
+    }).join(' / ')
   );
 
   return {
     personId: person.id,
     name: person.name,
     type: person.type,
-    date: input.date,
-    entries: result.entries,
-    addedCount: result.addedCount,
+    days: days,
     isNewPerson: person.isNew
   };
 }
@@ -80,27 +96,74 @@ function validateEntryInput_(payload) {
   const contact = trimStr_(payload.contact);
   if (contact.length > 100) errors.push('連絡先が長すぎます。');
 
-  const date = trimStr_(payload.date);
-  if (!isValidDateStr_(date)) errors.push('日付を選んでください。');
-
   const type = trimStr_(payload.type) === PERSON_TYPE.STAFF
     ? PERSON_TYPE.STAFF
     : PERSON_TYPE.VOLUNTEER;
 
-  const rawRanges = Array.isArray(payload.ranges) ? payload.ranges : [];
-  if (rawRanges.length === 0) errors.push('入れる時間帯を1つ以上入力してください。');
-  if (rawRanges.length > MAX_RANGES_PER_SUBMIT) {
-    errors.push('一度に登録できる時間帯は' + MAX_RANGES_PER_SUBMIT + '件までです。');
+  const rawDays = Array.isArray(payload.days) ? payload.days : [];
+  if (rawDays.length === 0) errors.push('入れる日を1つ以上入力してください。');
+  if (rawDays.length > MAX_DAYS_PER_SUBMIT) {
+    errors.push('一度に登録できる日は' + MAX_DAYS_PER_SUBMIT + '日までです。');
   }
 
   const unit = Number(getConfigValue_(CONFIG_KEY.SLOT_UNIT_MINUTES, 10)) || 10;
+  const byDate = {};
+  const days = [];
+
+  rawDays.slice(0, MAX_DAYS_PER_SUBMIT).forEach(function (d) {
+    const date = trimStr_(d && d.date);
+    if (!isValidDateStr_(date)) {
+      errors.push('日付を選んでください。');
+      return;
+    }
+    // 同じ日を2ブロック書かれても、まとめて1日として扱う（申告を取りこぼさない）
+    if (byDate[date]) {
+      byDate[date].ranges = byDate[date].ranges.concat(
+        parseRanges_(d.ranges, date, unit, errors));
+      return;
+    }
+    const day = { date: date, ranges: parseRanges_(d.ranges, date, unit, errors) };
+    byDate[date] = day;
+    days.push(day);
+  });
+
+  days.forEach(function (day) {
+    if (day.ranges.length === 0) {
+      errors.push(day.date + ': 入れる時間帯を1つ以上入力してください。');
+    }
+  });
+
+  if (errors.length > 0) throw new Error(errors.join('\n'));
+
+  // 日付順に整える。控えとログが読みやすくなる
+  days.sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+
+  return {
+    name: name,
+    contact: contact,
+    type: type,
+    days: days,
+    operator: trimStr_(payload.operator)
+  };
+}
+
+/**
+ * 1日分の時間帯を検証して分単位に直す。
+ * 不正な行は errors に積んで捨てる（その日の他の行は活かす）。
+ */
+function parseRanges_(rawRanges, date, unit, errors) {
+  const list = Array.isArray(rawRanges) ? rawRanges : [];
+  if (list.length > MAX_RANGES_PER_SUBMIT) {
+    errors.push(date + ': 1日に登録できる時間帯は' + MAX_RANGES_PER_SUBMIT + '件までです。');
+  }
+
   const ranges = [];
-  rawRanges.slice(0, MAX_RANGES_PER_SUBMIT).forEach(function (r, i) {
-    const label = (i + 1) + 'つ目の時間帯';
+  list.slice(0, MAX_RANGES_PER_SUBMIT).forEach(function (r, i) {
+    const label = date + ' の' + (i + 1) + 'つ目の時間帯';
     const start = trimStr_(r && r.start);
     const end = trimStr_(r && r.end);
     if (!isValidTimeStr_(start) || !isValidTimeStr_(end)) {
-      errors.push(label + ': 時刻を選んでください。');
+      errors.push(label + ': 時刻を入力してください。');
       return;
     }
     if (toMinutes_(start) >= toMinutes_(end)) {
@@ -108,22 +171,12 @@ function validateEntryInput_(payload) {
       return;
     }
     if (!isOnUnit_(start, unit) || !isOnUnit_(end, unit)) {
-      errors.push(label + ': 時刻は' + unit + '分単位で選んでください。');
+      errors.push(label + ': 時刻は' + unit + '分単位で入力してください。');
       return;
     }
     ranges.push({ start: toMinutes_(start), end: toMinutes_(end) });
   });
-
-  if (errors.length > 0) throw new Error(errors.join('\n'));
-
-  return {
-    name: name,
-    contact: contact,
-    type: type,
-    date: date,
-    ranges: ranges,
-    operator: trimStr_(payload.operator)
-  };
+  return ranges;
 }
 
 // ---------------------------------------------------------------------------

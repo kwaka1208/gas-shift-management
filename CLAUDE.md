@@ -51,8 +51,7 @@ service_auth.js  … 閲覧トークンの検証とエディタ専用関数の�
 repo_sheet.js    … シート読み書きの共通処理（バッチ前提）
 config.js        … シート定義・定数
 util.js          … 日付/時刻変換、区間の重なり判定など
-index.html       … 配置表（規模次第で style.html / script.html に分割）
-people.html      … 人の空き状況（人ごとのタイムライン）
+index.html       … 配置表（上=場所ごと／下=人ごと。style.html / script.html に分割）
 ```
 
 内部専用関数は末尾アンダースコア（`toMinutes_`）を付ける。

@@ -4,11 +4,11 @@
  * URL:
  *   ?t=<token>&view=board&d=YYYY-MM-DD … 配置表（既定。閲覧のみ）
  *   ?t=<token>&view=admin&d=YYYY-MM-DD … 配置表（枠の作成・割り当てができる）
- *   ?t=<token>&view=people&d=YYYY-MM-DD … 人の空き状況（人ごとのタイムライン）
  *   ?t=<token>&view=entry              … 可用性登録フォーム
  *   ?t=<token>&view=print&d=YYYY-MM-DD … 印刷用配置表（Phase 5）
  *
  * board と admin は同じ画面（index.html）で、boot.admin の真偽だけが違う。
+ * 配置表には「場所ごと」と「人ごと」の両方が縦に並ぶ（design.md 4.1）。
  *
  * **これは保護ではない。** トークンは共通なので、閲覧URLを知っていれば管理URLも作れる。
  * 誤操作を防ぐための画面の分離であり、認証ではない（design.md 2）。
@@ -18,13 +18,12 @@
 const DEFAULT_VIEW = 'board';
 
 /** 実装済みの画面（Phase の進行に合わせて増やす） */
-const KNOWN_VIEWS = ['board', 'admin', 'people', 'entry', 'print'];
+const KNOWN_VIEWS = ['board', 'admin', 'entry', 'print'];
 
 /** ビュー → HTMLファイル名。ここに無いビューは「準備中」を返す */
 const VIEW_TEMPLATES = {
   board: 'index',
   admin: 'index',
-  people: 'people',
   entry: 'entry'
 };
 
@@ -72,8 +71,8 @@ function doGet(e) {
     date: date,
     // 管理画面かどうか。セキュリティ境界ではなく、画面を出し分けるためのフラグ
     admin: view === 'admin',
-    // どこから来たか。戻り先のリンクを決めるためだけに使う
-    from: trimStr_(params.from),
+    // 画面から画面へのリンクの土台。**相対URLは使えない**（iframe の中で動くため）
+    baseUrl: webAppUrl_(),
     // 代理入力モード。セキュリティ境界ではなく、画面を出し分けるためのフラグ
     proxy: trimStr_(params.proxy) === '1'
   };

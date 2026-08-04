@@ -16,7 +16,7 @@
 </head>
 <body>
   <div class="page">
-    <h1 class="page__title" id="pageTitle">入れる時間帯を教えてください</h1>
+    <h1 class="page__title" id="pageTitle">ボランティア登録</h1>
 
     <div class="loading" id="loading">読み込んでいます…</div>
 
@@ -46,18 +46,13 @@
       </div>
 
       <div class="field">
-        <label for="f_date">日付 <span class="req">必須</span></label>
-        <input type="date" id="f_date">
-      </div>
-
-      <div class="field">
-        <label>入れる時間帯 <span class="req">必須</span></label>
-        <div id="rangeList"></div>
-        <div class="rangeActions">
-          <button type="button" class="btn" id="addRange">＋ 時間帯を追加</button>
-          <button type="button" class="btn" id="allDay">終日OK</button>
-        </div>
-        <p class="hint">午前と午後だけなど、離れた時間帯もそれぞれ追加できます。</p>
+        <label>入れる日と時間帯 <span class="req">必須</span></label>
+        <div id="dayList"></div>
+        <button type="button" class="btn btn--block btn--sub" id="addDay">＋ 日付を追加</button>
+        <p class="hint">複数の日に入れる場合は「＋ 日付を追加」を押してください。
+          直前の日と同じ時間帯が入るので、違うときだけ直してください。</p>
+        <p class="hint">途中で抜ける日は「＋ 時間帯を追加」で分けて入力してください。
+          （例: 10:00〜12:00 と 15:00〜17:00）</p>
       </div>
 
       <button type="submit" class="btn btn--primary btn--block" id="submitBtn">この内容で登録する</button>

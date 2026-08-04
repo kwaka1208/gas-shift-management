@@ -103,7 +103,7 @@ function getDayBoard(token, date) {
  * それ自体が記名になっている。代理入力のときだけ payload.operator が入る。
  *
  * @param {string} token 閲覧トークン
- * @param {Object} payload 名前 / 連絡先 / 種別 / 日付 / 時間帯配列 / 代理入力者
+ * @param {Object} payload 名前 / 連絡先 / 種別 / days（日付と時間帯の配列）/ 代理入力者
  */
 function submitAvailability(token, payload) {
   return handle_('submitAvailability', function () {
@@ -121,8 +121,7 @@ function submitAvailability(token, payload) {
 /**
  * 枠に人を割り当てる。
  *
- * **必要人数の超過は弾かない**（予備要員・引き継ぎの運用があるため）。
- * 超過した場合は data.notice にその旨が入るので、画面で伝えること。
+ * **人数では止めない**（人数は場所単位で運用する方針）。
  * 同じ時間に別の枠へ割り当て済みの場合だけはエラーにする。
  *
  * @param {string} token 閲覧トークン
@@ -145,8 +144,7 @@ function assign(token, slotId, personId) {
  * 両方から呼ばれる。同じ日付・場所・開始・終了の枠が既にあれば、それを使い回す。
  *
  * @param {string} token 閲覧トークン
- * @param {Object} payload date / place_id / start_time / end_time / required_count /
- *                         staff_required / person_id
+ * @param {Object} payload date / place_id / start_time / end_time / person_id
  */
 function assignToNewSlot(token, payload) {
   return handle_('assignToNewSlot', function () {
