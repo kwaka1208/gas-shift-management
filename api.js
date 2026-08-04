@@ -11,8 +11,9 @@
  *   - 運用系（setup など）は冒頭で requireOwner_() を呼ぶ
  * のいずれかを必ず満たすこと。
  *
- * **管理者の合言葉認証は無い。** 閲覧トークンを知っている人は全員が書き込める。
- * 書き込み系は代わりに操作者名の記名を必須とし、`_log` に残す。
+ * **認証も記名も無い。** 閲覧トークンを知っている人は全員が書き込める。
+ * 管理URL（?view=admin）は画面を分けるだけで、保護にはならない。
+ * `_log` の操作者列には LOG_OPERATOR（固定値）が入る。
  */
 
 /** 成功レスポンス */
@@ -60,19 +61,6 @@ function withLock_(fn) {
   }
 }
 
-/**
- * 操作者名を検証する。
- *
- * 合言葉を廃止したため、**記名が唯一の説明責任の手がかり**になる。
- * 空のまま書き込ませない。
- */
-function requireOperator_(operator) {
-  const name = trimStr_(operator);
-  if (!name) throw new Error('操作する人を選んでください。');
-  if (name.length > 50) throw new Error('お名前が長すぎます。');
-  return name;
-}
-
 // ---------------------------------------------------------------------------
 // 読み取り
 // ---------------------------------------------------------------------------
@@ -81,7 +69,7 @@ function requireOperator_(operator) {
  * 画面の初期化データ。日付に依存しないものだけを返す。
  *
  * @param {string} token 閲覧トークン
- * @return {{ ok: boolean, data?: { config, places, operators, templateNames }, error?: string }}
+ * @return {{ ok: boolean, data?: { config, places, templateNames }, error?: string }}
  */
 function getBootstrap(token) {
   return handle_('getBootstrap', function () {
@@ -127,7 +115,7 @@ function submitAvailability(token, payload) {
 }
 
 // ---------------------------------------------------------------------------
-// 書き込み（すべて閲覧トークン＋記名が必要。すべて Lock 内で実行する）
+// 書き込み（閲覧トークンだけが条件。すべて Lock 内で実行する）
 // ---------------------------------------------------------------------------
 
 /**
@@ -140,14 +128,12 @@ function submitAvailability(token, payload) {
  * @param {string} token 閲覧トークン
  * @param {string} slotId
  * @param {string} personId
- * @param {string} operator 操作者名（記名。必須）
  */
-function assign(token, slotId, personId, operator) {
+function assign(token, slotId, personId) {
   return handle_('assign', function () {
     requireViewToken_(token);
-    const name = requireOperator_(operator);
     return withLock_(function () {
-      return assignData_(slotId, personId, name);
+      return assignData_(slotId, personId, LOG_OPERATOR);
     });
   });
 }
@@ -161,14 +147,12 @@ function assign(token, slotId, personId, operator) {
  * @param {string} token 閲覧トークン
  * @param {Object} payload date / place_id / start_time / end_time / required_count /
  *                         staff_required / person_id
- * @param {string} operator 操作者名（記名。必須）
  */
-function assignToNewSlot(token, payload, operator) {
+function assignToNewSlot(token, payload) {
   return handle_('assignToNewSlot', function () {
     requireViewToken_(token);
-    const name = requireOperator_(operator);
     return withLock_(function () {
-      return assignToNewSlotData_(payload, name);
+      return assignToNewSlotData_(payload, LOG_OPERATOR);
     });
   });
 }
@@ -178,14 +162,12 @@ function assignToNewSlot(token, payload, operator) {
  *
  * @param {string} token 閲覧トークン
  * @param {string} assignmentId
- * @param {string} operator 操作者名（記名。必須）
  */
-function unassign(token, assignmentId, operator) {
+function unassign(token, assignmentId) {
   return handle_('unassign', function () {
     requireViewToken_(token);
-    const name = requireOperator_(operator);
     return withLock_(function () {
-      return unassignData_(assignmentId, name);
+      return unassignData_(assignmentId, LOG_OPERATOR);
     });
   });
 }
@@ -195,14 +177,12 @@ function unassign(token, assignmentId, operator) {
  *
  * @param {string} token 閲覧トークン
  * @param {Array<Object>} places 画面上の一覧そのまま
- * @param {string} operator 操作者名（記名。必須）
  */
-function savePlaces(token, places, operator) {
+function savePlaces(token, places) {
   return handle_('savePlaces', function () {
     requireViewToken_(token);
-    const name = requireOperator_(operator);
     return withLock_(function () {
-      return savePlacesData_(places, name);
+      return savePlacesData_(places, LOG_OPERATOR);
     });
   });
 }
@@ -214,14 +194,12 @@ function savePlaces(token, places, operator) {
  * @param {string} token 閲覧トークン
  * @param {string} date 'YYYY-MM-DD'
  * @param {Array<Object>} slots その日の枠の全件
- * @param {string} operator 操作者名（記名。必須）
  */
-function saveSlots(token, date, slots, operator) {
+function saveSlots(token, date, slots) {
   return handle_('saveSlots', function () {
     requireViewToken_(token);
-    const name = requireOperator_(operator);
     return withLock_(function () {
-      return saveSlotsData_(date, slots, name);
+      return saveSlotsData_(date, slots, LOG_OPERATOR);
     });
   });
 }
@@ -234,14 +212,12 @@ function saveSlots(token, date, slots, operator) {
  * @param {string} templateName slot_templates の template_name
  * @param {string} fromDate 'YYYY-MM-DD'
  * @param {string} toDate 'YYYY-MM-DD'
- * @param {string} operator 操作者名（記名。必須）
  */
-function generateSlots(token, templateName, fromDate, toDate, operator) {
+function generateSlots(token, templateName, fromDate, toDate) {
   return handle_('generateSlots', function () {
     requireViewToken_(token);
-    const name = requireOperator_(operator);
     return withLock_(function () {
-      return generateSlotsData_(templateName, fromDate, toDate, name);
+      return generateSlotsData_(templateName, fromDate, toDate, LOG_OPERATOR);
     });
   });
 }
@@ -254,14 +230,12 @@ function generateSlots(token, templateName, fromDate, toDate, operator) {
  * @param {string} fromDate コピー元の開始日
  * @param {string} toDate コピー先の開始日
  * @param {number} dayCount コピーする日数（既定1）
- * @param {string} operator 操作者名（記名。必須）
  */
-function copySlots(token, fromDate, toDate, dayCount, operator) {
+function copySlots(token, fromDate, toDate, dayCount) {
   return handle_('copySlots', function () {
     requireViewToken_(token);
-    const name = requireOperator_(operator);
     return withLock_(function () {
-      return copySlotsData_(fromDate, toDate, dayCount, name);
+      return copySlotsData_(fromDate, toDate, dayCount, LOG_OPERATOR);
     });
   });
 }

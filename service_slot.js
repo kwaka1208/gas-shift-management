@@ -108,7 +108,13 @@ function saveSlotsData_(date, slots, operator) {
   const errors = [];
   const cleaned = [];
   input.forEach(function (s, i) {
-    const label = (i + 1) + '件目';
+    // 「1件目」だけでは、画面のどの枠のことか分からない。
+    // その日の枠を丸ごと送る仕組みなので、**今いじった枠とは限らない**（既存の枠が
+    // 壊れていることもある）。時刻を添えて、どれを直せばよいか分かるようにする
+    const times = (trimStr_(s.start_time) && trimStr_(s.end_time))
+      ? '（' + trimStr_(s.start_time) + '–' + trimStr_(s.end_time) + '）'
+      : '';
+    const label = (i + 1) + '件目' + times;
     const id = trimStr_(s.id);
     if (id && !byId.has(id)) {
       errors.push(label + ': 存在しない枠です（他の端末で削除された可能性があります）。');
@@ -174,8 +180,14 @@ function validateSlotInput_(s, date, placeById, unit, label, errors) {
   let bad = false;
 
   const placeId = trimStr_(s.place_id);
-  if (!placeId || !placeById.has(placeId)) {
+  if (!placeId) {
     errors.push(label + ': 場所を選んでください。');
+    bad = true;
+  } else if (!placeById.has(placeId)) {
+    // 場所の行が消された枠は配置表に描かれないため、画面から直せない。
+    // どの id を探せばよいかを出して、シートで追えるようにする
+    errors.push(label + ': この枠が指している場所が places シートにありません（place_id: ' +
+      placeId + '）。places シートを確認してください。');
     bad = true;
   }
 

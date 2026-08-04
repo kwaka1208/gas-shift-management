@@ -22,7 +22,6 @@
     token: BOOT.token,
     proxy: BOOT.proxy === true,
     config: null,
-    operators: [],
     busy: false
   };
 
@@ -33,7 +32,6 @@
 
     call('getBootstrap', state.token).then(function (data) {
       state.config = data.config;
-      state.operators = data.operators || [];
       setupProxyFields();
       addRangeRow();
       $('loading').hidden = true;
@@ -43,31 +41,25 @@
     });
   }
 
-  /** 代理入力モードのときだけ、種別と入力者の欄を出す */
+  /**
+   * 代理入力モードのときだけ、種別の欄を出す。
+   *
+   * 「入力した人」の欄は画面から外した。サーバー側（payload.operator の受け取りと
+   * `_log` への記録）はそのまま残してあるので、必要になれば欄を戻すだけで復活する。
+   */
   function setupProxyFields() {
     if (!state.proxy) return;
     $('pageTitle').textContent = '代理で登録する';
     $('typeField').hidden = false;
-    $('operatorField').hidden = false;
-    $('operatorInput').innerHTML = state.operators.length > 0
-      ? '<select id="f_operator"><option value="">選んでください</option>' +
-          state.operators.map(function (o) {
-            return '<option value="' + esc(o) + '">' + esc(o) + '</option>';
-          }).join('') + '</select>'
-      : '<input type="text" id="f_operator" maxlength="50" placeholder="入力した人のお名前">';
   }
 
   // ------------------------------------------------------------ 時間帯の行
 
-  function timeOptions(selected) {
-    const cfg = state.config;
-    return App.timeOptions(toMin(cfg.day_start), toMin(cfg.day_end),
-      cfg.slot_unit_minutes || 10, selected);
-  }
-
   /**
    * 時間帯の行を1つ足す。
-   * 既定値は「前の行の終了時刻から」。連続で入力するときに選び直す手間を減らす。
+   * 既定値は「前の行の終了時刻から」。連続で入力するときに打ち直す手間を減らす。
+   *
+   * 時刻はプルダウンではなく、時・分の直接入力（App.timeFields）。
    */
   function addRangeRow(start, end) {
     const cfg = state.config;
@@ -77,7 +69,8 @@
 
     if (!start) {
       const last = rows.length > 0 ? rows[rows.length - 1] : null;
-      const from = last ? toMin(last.querySelector('.rangeEnd').value) : dayStart;
+      const lastEnd = last ? App.readTimeFields(last.querySelector('.rangeEnd')) : '';
+      const from = lastEnd ? toMin(lastEnd) : dayStart;
       start = toHHMM(Math.min(from, dayEnd - 60 > dayStart ? dayEnd - 60 : dayStart));
       end = toHHMM(Math.min(toMin(start) + 180, dayEnd));
     }
@@ -85,9 +78,9 @@
     const row = document.createElement('div');
     row.className = 'rangeRow';
     row.innerHTML =
-      '<select class="rangeStart" aria-label="開始時刻">' + timeOptions(start) + '</select>' +
+      App.timeFields({ cls: 'rangeStart', value: start, label: '開始' }) +
       '<span class="rangeRow__sep">〜</span>' +
-      '<select class="rangeEnd" aria-label="終了時刻">' + timeOptions(end) + '</select>' +
+      App.timeFields({ cls: 'rangeEnd', value: end, label: '終了' }) +
       '<button type="button" class="btn btn--icon rangeRow__del" aria-label="この時間帯を削除">×</button>';
 
     row.querySelector('.rangeRow__del').addEventListener('click', function () {
@@ -97,11 +90,13 @@
     });
 
     // 開始を後ろにずらしたら、終了もついてくる（終了 <= 開始 を作らせない）
-    row.querySelector('.rangeStart').addEventListener('change', function (e) {
-      const endSel = row.querySelector('.rangeEnd');
-      if (toMin(endSel.value) <= toMin(e.target.value)) {
-        const next = Math.min(toMin(e.target.value) + 60, dayEnd);
-        endSel.value = toHHMM(next);
+    App.onTimeFieldsInput(row.querySelector('.rangeStart'), function () {
+      const startVal = App.readTimeFields(row.querySelector('.rangeStart'));
+      const endEl = row.querySelector('.rangeEnd');
+      const endVal = App.readTimeFields(endEl);
+      if (!startVal || !endVal) return;
+      if (toMin(endVal) <= toMin(startVal)) {
+        App.writeTimeFields(endEl, toHHMM(Math.min(toMin(startVal) + 60, 24 * 60 - 1)));
       }
     });
 
@@ -120,8 +115,8 @@
   function readRanges() {
     return Array.prototype.map.call($('rangeList').children, function (row) {
       return {
-        start: row.querySelector('.rangeStart').value,
-        end: row.querySelector('.rangeEnd').value
+        start: App.readTimeFields(row.querySelector('.rangeStart')),
+        end: App.readTimeFields(row.querySelector('.rangeEnd'))
       };
     });
   }
@@ -161,6 +156,11 @@
     if (!payload.date) {
       showError('日付を選んでください。');
       $('f_date').focus();
+      return;
+    }
+    const empty = payload.ranges.filter(function (r) { return !r.start || !r.end; });
+    if (empty.length > 0) {
+      showError('入れる時間帯を入力してください（時は0〜23、分は0〜59）。');
       return;
     }
     const bad = payload.ranges.filter(function (r) { return toMin(r.end) <= toMin(r.start); });

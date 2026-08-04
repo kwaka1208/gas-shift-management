@@ -139,8 +139,12 @@ const CONFIG_DEFAULTS = {
   slot_unit_minutes: '10',
   staff_default_start: '10:00',
   staff_default_end: '17:00',
-  public_name_style: 'full',
-  operators: ''
+  // 枠が1つも無い場所に、この時間帯の枠を仮想的に表示する（シートには書かない）。
+  // 開始か終了を空にすると表示しなくなる
+  default_slot_start: '10:00',
+  default_slot_end: '17:00',
+  default_slot_required: '1',
+  public_name_style: 'full'
 };
 
 /** `_config` のキー名 */
@@ -151,9 +155,20 @@ const CONFIG_KEY = {
   SLOT_UNIT_MINUTES: 'slot_unit_minutes',
   STAFF_DEFAULT_START: 'staff_default_start',
   STAFF_DEFAULT_END: 'staff_default_end',
-  PUBLIC_NAME_STYLE: 'public_name_style',
-  OPERATORS: 'operators'
+  DEFAULT_SLOT_START: 'default_slot_start',
+  DEFAULT_SLOT_END: 'default_slot_end',
+  DEFAULT_SLOT_REQUIRED: 'default_slot_required',
+  PUBLIC_NAME_STYLE: 'public_name_style'
 };
 
 /** LockService の待機時間（ミリ秒） */
 const LOCK_TIMEOUT_MS = 10000;
+
+/**
+ * `_log` に残す操作者名。
+ *
+ * **記名は行わない**（design.md 2）。管理URLを開けば誰でも操作できるため、
+ * 誰が操作したかは記録できない。列を空にすると「記録し忘れ」と区別が付かないので、
+ * 記名していないことが分かる固定値を入れる。
+ */
+const LOG_OPERATOR = '(管理画面)';

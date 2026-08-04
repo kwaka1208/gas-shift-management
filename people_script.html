@@ -1,0 +1,343 @@
+<script>
+/*
+  people_script.html … 人の空き状況のロジック
+
+  データは配置表と同じ getDayBoard 1回で足りる（枠・割り当て・人・可用性が揃って返る）。
+  **この画面のために新しいAPIは作らない。** 見せ方を変えているだけなので、
+  サーバー往復を増やす理由が無い（CLAUDE.md 開発ルール）。
+*/
+
+(function () {
+  'use strict';
+
+  const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+  const $ = function (id) { return document.getElementById(id); };
+
+  const call = App.call;
+  const esc = App.esc;
+  const toMin = App.toMin;
+  const toHHMM = App.toHHMM;
+  const addDays = App.addDays;
+  const dowOf = App.dowOf;
+  const todayStr = App.todayStr;
+  const toast = App.toast;
+
+  /*
+    戻り先は「来た画面」に合わせる。管理画面から来たなら管理画面へ、
+    それ以外は閲覧用の配置表へ戻す（閲覧者に管理画面への導線を作らない）。
+  */
+  const BACK_VIEW = BOOT.from === 'admin' ? 'admin' : 'board';
+
+  const state = {
+    token: BOOT.token,
+    date: BOOT.date,
+    config: null,
+    places: [],
+    slots: [],
+    assignments: [],
+    people: [],
+    availability: [],
+    peopleById: {},
+    placesById: {}
+  };
+
+  // ------------------------------------------------------------ 起動
+
+  function boot() {
+    $('datePicker').value = state.date;
+    updateBackLink();
+
+    Promise.all([
+      call('getBootstrap', state.token),
+      call('getDayBoard', state.token, state.date)
+    ]).then(function (res) {
+      state.config = res[0].config;
+      state.places = res[0].places;
+      state.placesById = {};
+      state.places.forEach(function (p) { state.placesById[p.id] = p; });
+      applyDayBoard(res[1]);
+      $('loading').hidden = true;
+      $('people').hidden = false;
+      render();
+    }).catch(function (e) {
+      $('loading').textContent = e.message;
+    });
+  }
+
+  function applyDayBoard(data) {
+    state.date = data.date;
+    state.slots = data.slots || [];
+    state.assignments = data.assignments || [];
+    state.people = data.people || [];
+    state.availability = data.availability || [];
+    state.peopleById = {};
+    state.people.forEach(function (p) { state.peopleById[p.id] = p; });
+  }
+
+  function loadDay(date) {
+    $('loading').textContent = '読み込んでいます…';
+    $('loading').hidden = false;
+    $('people').hidden = true;
+    return call('getDayBoard', state.token, date).then(function (data) {
+      applyDayBoard(data);
+      $('datePicker').value = state.date;
+      updateBackLink();
+      $('loading').hidden = true;
+      $('people').hidden = false;
+      render();
+    }).catch(function (e) {
+      $('loading').textContent = e.message;
+      toast(e.message, true);
+    });
+  }
+
+  /** 見ている日のまま配置表へ戻れるようにする */
+  function updateBackLink() {
+    $('boardLink').href = '?t=' + encodeURIComponent(state.token) +
+      '&view=' + BACK_VIEW + '&d=' + state.date;
+  }
+
+  // ------------------------------------------------------------ 集計
+
+  function slotOf(slotId) {
+    return state.slots.filter(function (s) { return s.id === slotId; })[0] || null;
+  }
+
+  function placeNameOf(placeId) {
+    const p = state.placesById[placeId];
+    return p ? p.name : '(不明な場所)';
+  }
+
+  /**
+   * 人ごとに「入れる時間」と「割り当て済み」を集める。
+   *
+   * 出すのは**その日に関わりのある人だけ**（申告した人、または割り当てのある人）。
+   * 継続参加者でもその日に申告が無ければ出さない。空行が並ぶと、空いている人を
+   * 探すという本来の目的が埋もれるため。
+   */
+  function buildRows() {
+    const byPerson = {};
+
+    const ensure = function (personId) {
+      if (!byPerson[personId]) {
+        byPerson[personId] = { personId: personId, free: [], busy: [] };
+      }
+      return byPerson[personId];
+    };
+
+    state.availability.forEach(function (a) {
+      ensure(a.person_id).free.push({
+        start: toMin(a.start_time),
+        end: toMin(a.end_time),
+        virtual: a.virtual === true
+      });
+    });
+
+    state.assignments.forEach(function (a) {
+      const s = slotOf(a.slot_id);
+      if (!s) return;
+      ensure(a.person_id).busy.push({
+        start: toMin(s.start_time),
+        end: toMin(s.end_time),
+        place: placeNameOf(s.place_id),
+        time: s.start_time + '–' + s.end_time
+      });
+    });
+
+    const rows = Object.keys(byPerson).map(function (personId) {
+      const row = byPerson[personId];
+      const person = state.peopleById[personId];
+      row.person = person || { id: personId, name: '(不明な人)', type: 'volunteer', kana: '' };
+      row.freeMin = totalMinutes(row.free);
+      row.busyMin = totalMinutes(row.busy);
+      // 申告の外に割り当てられている人は目立たせる（design.md 6.5 no_availability）
+      row.outside = row.busy.filter(function (b) { return !coveredBy(row.free, b); }).length;
+      row.free.sort(byStart);
+      row.busy.sort(byStart);
+      return row;
+    });
+
+    return rows.sort(compareRows);
+  }
+
+  function byStart(a, b) { return a.start - b.start || a.end - b.end; }
+
+  /** 重なりを取り除いた合計分数。可用性は重ならない前提だが、割り当ては念のため畳む */
+  function totalMinutes(ranges) {
+    const sorted = ranges.slice().sort(byStart);
+    let total = 0;
+    let cur = null;
+    sorted.forEach(function (r) {
+      if (cur && r.start <= cur.end) {
+        if (r.end > cur.end) { total += r.end - cur.end; cur.end = r.end; }
+      } else {
+        total += r.end - r.start;
+        cur = { start: r.start, end: r.end };
+      }
+    });
+    return total;
+  }
+
+  /** その割り当てが、申告のどれかに収まっているか */
+  function coveredBy(free, busy) {
+    return free.some(function (f) { return f.start <= busy.start && busy.end <= f.end; });
+  }
+
+  /**
+   * まだ余裕のある人を上に出す。
+   * 「あと誰に頼めるか」を探す画面なので、割り当ての少ない人から見えた方が速い。
+   * 同数ならボランティアを先に（design.md 6.3 の並びに合わせる）。
+   */
+  function compareRows(a, b) {
+    if (a.busyMin !== b.busyMin) return a.busyMin - b.busyMin;
+    const at = a.person.type === 'staff' ? 1 : 0;
+    const bt = b.person.type === 'staff' ? 1 : 0;
+    if (at !== bt) return at - bt;
+    const ak = a.person.kana || a.person.name || '';
+    const bk = b.person.kana || b.person.name || '';
+    return String(ak).localeCompare(String(bk), 'ja');
+  }
+
+  // ------------------------------------------------------------ 描画
+
+  function render() {
+    $('dateDow').textContent = '(' + DOW[dowOf(state.date)] + ')';
+
+    const cfg = state.config;
+    const dayStart = toMin(cfg.day_start);
+    const dayEnd = toMin(cfg.day_end);
+    const total = dayEnd - dayStart;
+
+    if (total <= 0) {
+      $('people').innerHTML = '<p class="empty">表示時間帯の設定が正しくありません（_config の day_start / day_end）。</p>';
+      return;
+    }
+
+    const rows = buildRows();
+    if (rows.length === 0) {
+      $('people').innerHTML = '<p class="empty">この日に入れる人がまだ登録されていません。' +
+        '応募フォームからの登録をお待ちください。</p>';
+      return;
+    }
+
+    $('people').innerHTML =
+      summaryHtml(rows) +
+      '<div class="board">' +
+        '<div class="board__scroll">' +
+          '<div class="board__inner" style="--hours:' + (total / 60) + '">' +
+            '<div class="board__axisRow">' +
+              '<div class="board__corner"></div>' +
+              '<div class="board__axis">' + renderTicks(dayStart, dayEnd, total) + '</div>' +
+            '</div>' +
+            rows.map(function (r) { return renderRow(r, dayStart, total); }).join('') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  /** その日ぜんたいの状況。個々の行を見る前に、足りているのかを掴めるようにする */
+  function summaryHtml(rows) {
+    const need = state.slots.reduce(function (sum, s) {
+      return sum + (Number(s.required_count) || 0);
+    }, 0);
+    const filled = state.assignments.length;
+    const freeMin = rows.reduce(function (sum, r) { return sum + r.freeMin; }, 0);
+    const busyMin = rows.reduce(function (sum, r) { return sum + r.busyMin; }, 0);
+    const idle = rows.filter(function (r) { return r.busyMin === 0; }).length;
+
+    return '<div class="resSummary">' +
+      '<span><b>' + rows.length + '</b>人が登録</span>' +
+      '<span>まだ割り当て無し <b>' + idle + '</b>人</span>' +
+      '<span>枠の充足 <b>' + filled + '</b>/' + need + '名</span>' +
+      '<span>時間 <b>' + hm(busyMin) + '</b> / ' + hm(freeMin) + '</span>' +
+    '</div>';
+  }
+
+  function renderTicks(dayStart, dayEnd, total) {
+    let html = '';
+    for (let m = dayStart; m <= dayEnd; m += 60) {
+      const left = (m - dayStart) / total * 100;
+      const edge = m === dayStart ? ' board__tick--first'
+        : (m + 60 > dayEnd ? ' board__tick--last' : '');
+      html += '<span class="board__tick' + edge +
+        '" style="left:' + left + '%">' + toHHMM(m) + '</span>';
+    }
+    return html;
+  }
+
+  /**
+   * 1人分の行。
+   *
+   * **可用の帯の上に、割り当ての帯を重ねて描く。** 申告した時間のうち、
+   * どこが埋まってどこが空いているのかを、目で追わずに分かるようにするため。
+   */
+  function renderRow(row, dayStart, total) {
+    const person = row.person;
+    const isStaff = person.type === 'staff';
+
+    const free = row.free.map(function (f) {
+      const box = clip(f, dayStart, total);
+      if (!box) return '';
+      // 職員の既定勤務時間帯は本人の申告ではないので、区別が付くようにする
+      return '<span class="res__free' + (f.virtual ? ' res__free--virtual' : '') + '"' +
+        ' style="left:' + box.left + '%;width:' + box.width + '%"></span>';
+    }).join('');
+
+    const busy = row.busy.map(function (b) {
+      const box = clip(b, dayStart, total);
+      if (!box) return '';
+      const outside = !coveredBy(row.free, b);
+      return '<span class="res__busy' + (outside ? ' res__busy--warn' : '') + '"' +
+        ' style="left:' + box.left + '%;width:' + box.width + '%"' +
+        ' title="' + esc(b.place + ' ' + b.time) + '">' +
+        '<span class="res__busyLabel">' + esc(b.place) + '</span>' +
+      '</span>';
+    }).join('');
+
+    const note = row.busyMin === 0
+      ? '<small class="res__idle">空き</small>'
+      : '<small>' + hm(row.busyMin) + ' / ' + hm(row.freeMin) + '</small>';
+
+    return '<div class="board__row">' +
+      '<div class="board__place">' +
+        esc(person.name) + (isStaff ? '<small>職員</small>' : '') +
+        note +
+        (row.outside > 0 ? '<small class="res__warn">申告外 ' + row.outside + '件</small>' : '') +
+      '</div>' +
+      '<div class="board__lanes res__lanes">' + free + busy + '</div>' +
+    '</div>';
+  }
+
+  /** 表示時間帯からはみ出した分を切り落とす。完全に外なら null */
+  function clip(range, dayStart, total) {
+    const dayEnd = dayStart + total;
+    const start = Math.max(range.start, dayStart);
+    const end = Math.min(range.end, dayEnd);
+    if (end <= start) return null;
+    return {
+      left: (start - dayStart) / total * 100,
+      width: (end - start) / total * 100
+    };
+  }
+
+  function hm(minutes) {
+    if (!minutes) return '0分';
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return (h > 0 ? h + '時間' : '') + (m > 0 ? m + '分' : '');
+  }
+
+  // ------------------------------------------------------------ イベント
+
+  $('prevDay').addEventListener('click', function () { loadDay(addDays(state.date, -1)); });
+  $('nextDay').addEventListener('click', function () { loadDay(addDays(state.date, 1)); });
+  $('todayBtn').addEventListener('click', function () { loadDay(todayStr()); });
+
+  $('datePicker').addEventListener('change', function (e) {
+    if (e.target.value) loadDay(e.target.value);
+    else e.target.value = state.date;
+  });
+
+  boot();
+})();
+</script>

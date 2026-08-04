@@ -152,8 +152,12 @@ function showViewUrl() {
  * どれを誰に配るのかを取り違えると事故になるため、必ずセットで表示する。
  */
 function printUrls_(token) {
-  console.log('配置表（管理者・閲覧者）: ' + buildViewUrl_(token));
+  console.log('配置表・閲覧用（見るだけ）: ' + buildViewUrl_(token));
+  console.log('配置表・管理用（枠と割り当てを編集できる）: ' + buildViewUrl_(token, '&view=admin'));
+  console.log('人の空き状況（誰がいつ空いているか）: ' + buildViewUrl_(token, '&view=people'));
   console.log('応募フォーム（QRコードにするのはこれ）: ' + buildViewUrl_(token, '&view=entry'));
   console.log('代理入力（管理者だけが使う）: ' + buildViewUrl_(token, '&view=entry&proxy=1'));
   console.log('閲覧トークン: ' + token);
+  console.log('※ 管理用URLは view=admin を足しただけです。閲覧用URLを知っている人は');
+  console.log('   管理用URLも作れます。**保護ではなく、誤操作を防ぐための画面の分離です。**');
 }

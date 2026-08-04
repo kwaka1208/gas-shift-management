@@ -66,14 +66,70 @@ const App = (function () {
       String(d.getDate()).padStart(2, '0')].join('-');
   }
 
-  /** 刻み幅の時刻の選択肢を組み立てる。selected が範囲外でも値を失わない */
-  function timeOptions(fromMin, toMin_, unit, selected) {
-    const values = [];
-    for (let m = fromMin; m <= toMin_; m += unit) values.push(toHHMM(m));
-    if (selected && values.indexOf(selected) === -1) values.push(selected);
-    return values.map(function (v) {
-      return '<option value="' + v + '"' + (v === selected ? ' selected' : '') + '>' + v + '</option>';
-    }).join('');
+  /*
+    時刻の入力欄（時・分をそれぞれ直接入力する）。
+
+    プルダウンは選択肢が多くなるほど遠くなり、スマホでは特に辛い。
+    数字を打てる人には打たせる方が速いので、2つの数値入力にしている。
+    表示時間帯の外の時刻も入力できる（配置表の表示範囲は _config で別に決まる）。
+  */
+
+  /**
+   * @param {{id?: string, cls?: string, value?: string, label?: string}} opts
+   *   value は 'HH:mm'。空でもよい
+   */
+  function timeFields(opts) {
+    const o = opts || {};
+    const v = String(o.value || '');
+    const ok = /^\d{1,2}:\d{2}$/.test(v);
+    const h = ok ? String(Number(v.split(':')[0])) : '';
+    const m = ok ? v.split(':')[1] : '';
+    const label = o.label ? esc(o.label) + 'の' : '';
+
+    return '<span class="timeInput' + (o.cls ? ' ' + o.cls : '') + '"' +
+      (o.id ? ' id="' + o.id + '"' : '') + '>' +
+      '<input type="number" class="timeInput__h" inputmode="numeric" pattern="[0-9]*"' +
+        ' min="0" max="23" step="1" value="' + esc(h) + '" aria-label="' + label + '時">' +
+      '<span class="timeInput__sep">:</span>' +
+      '<input type="number" class="timeInput__m" inputmode="numeric" pattern="[0-9]*"' +
+        ' min="0" max="59" step="1" value="' + esc(m) + '" aria-label="' + label + '分">' +
+    '</span>';
+  }
+
+  /**
+   * 時刻入力欄の値を 'HH:mm' で読む。
+   * **未入力・範囲外のときは空文字を返す。** 呼び出し側でエラーにすること。
+   */
+  function readTimeFields(el) {
+    if (!el) return '';
+    const h = el.querySelector('.timeInput__h').value.trim();
+    const m = el.querySelector('.timeInput__m').value.trim();
+    if (h === '' || m === '') return '';
+
+    const hn = Number(h);
+    const mn = Number(m);
+    if (!isFinite(hn) || !isFinite(mn)) return '';
+    if (hn !== Math.floor(hn) || mn !== Math.floor(mn)) return '';
+    if (hn < 0 || hn > 23 || mn < 0 || mn > 59) return '';
+
+    return String(hn).padStart(2, '0') + ':' + String(mn).padStart(2, '0');
+  }
+
+  /** 時刻入力欄に 'HH:mm' を書き戻す */
+  function writeTimeFields(el, value) {
+    if (!el || !/^\d{1,2}:\d{2}$/.test(String(value))) return;
+    const parts = String(value).split(':');
+    el.querySelector('.timeInput__h').value = String(Number(parts[0]));
+    el.querySelector('.timeInput__m').value = parts[1];
+  }
+
+  /** 時・分のどちらが変わっても呼ばれるようにする */
+  function onTimeFieldsInput(el, fn) {
+    if (!el) return;
+    el.querySelectorAll('input').forEach(function (input) {
+      input.addEventListener('input', fn);
+      input.addEventListener('change', fn);
+    });
   }
 
   let toastTimer = null;
@@ -95,7 +151,10 @@ const App = (function () {
     addDays: addDays,
     dowOf: dowOf,
     todayStr: todayStr,
-    timeOptions: timeOptions,
+    timeFields: timeFields,
+    readTimeFields: readTimeFields,
+    writeTimeFields: writeTimeFields,
+    onTimeFieldsInput: onTimeFieldsInput,
     toast: toast
   };
 })();

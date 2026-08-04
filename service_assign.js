@@ -77,9 +77,12 @@ function assignToNewSlotData_(input, operator) {
     place_id: payload.place_id,
     start_time: payload.start_time,
     end_time: payload.end_time,
-    // 割り当てから作る枠は既定で1名（＝入った人で充足）。画面から変更できる
+    // 割り当てから作る枠の必要人数は `_config` の default_slot_required に従う
+    // （既定は1名＝入った人で充足）。画面から変更できる
     required_count: (payload.required_count === '' || payload.required_count === undefined ||
-      payload.required_count === null) ? 1 : payload.required_count,
+      payload.required_count === null)
+      ? getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_REQUIRED, 1)
+      : payload.required_count,
     staff_required: payload.staff_required,
     note: payload.note
   }, date, placeById, unit, '枠', errors);

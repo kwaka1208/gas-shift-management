@@ -18,6 +18,11 @@
   --danger: #b3261e;
   --slot-bg: #eef2f7;
   --slot-line: #b9c4d2;
+  --res-free: #e6ebf1;
+  --res-free-line: #ccd5df;
+
+  /* 画面の左右の余白。狭い画面では小さく、広い画面では大きくする */
+  --gutter: .75rem;
 
   --place-w: 6rem;
   --hour-w: 5rem;      /* 1時間あたりの最小幅。狭い画面では横スクロールになる */
@@ -52,7 +57,7 @@ body {
   z-index: 30;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
-  padding: .5rem .625rem;
+  padding: .5rem var(--gutter);
 }
 
 .head__row {
@@ -161,7 +166,11 @@ input[type="date"] {
   color: var(--fg-weak);
 }
 
-.board { padding: .5rem 0 4rem; }
+/*
+  左右の余白は .board に持たせる。横スクロールの器（.board__scroll）ごと内側へ寄るため、
+  場所の列の position: sticky は余白の内側の端に貼り付く（見た目が崩れない）。
+*/
+.board { padding: .5rem var(--gutter) 4rem; }
 
 .board__scroll {
   overflow-x: auto;
@@ -266,6 +275,19 @@ input[type="date"] {
 .slot--editable, .slot--assignable { cursor: pointer; }
 .slot--editable:hover, .slot--assignable:hover { background: #e4eaf1; }
 
+/*
+  仮想の枠（_config の既定時間帯）。まだシートに無いことが一目で分かるよう、
+  破線と淡い色にする。人を入れると実線の枠になる。
+*/
+.slot--virtual {
+  background: transparent;
+  border: 1px dashed var(--slot-line);
+  border-left: 3px dashed var(--fg-weak);
+  color: var(--fg-weak);
+}
+
+.slot--virtual:hover { background: var(--accent-weak); }
+
 .slot__time { display: block; font-weight: 600; white-space: nowrap; }
 .slot__meta { display: block; color: var(--fg-weak); white-space: nowrap; }
 .slot__note { color: var(--fg-weak); }
@@ -277,6 +299,94 @@ input[type="date"] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ------------------------------------------------ 人の空き状況（people） */
+
+/*
+  配置表と同じタイムラインの骨組み（.board / .board__row / .board__lanes）を使い、
+  中身だけ差し替える。縦が人、横が時間。
+*/
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .875rem;
+  margin: .5rem 0 0;
+  font-size: .75rem;
+  color: var(--fg-weak);
+}
+
+.legend__item { display: inline-flex; align-items: center; gap: .375rem; }
+
+.legend__swatch {
+  width: 1.5rem;
+  height: .75rem;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.legend__swatch--free { background: var(--res-free); border: 1px solid var(--res-free-line); }
+.legend__swatch--busy { background: var(--accent); }
+
+.resSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem 1.25rem;
+  padding: .625rem var(--gutter) 0;
+  font-size: .8125rem;
+  color: var(--fg-weak);
+}
+
+.resSummary b { color: var(--fg); font-size: 1rem; }
+
+/* 氏名と時間の2行が入るので、場所の列より広く取る */
+#people .board__place,
+#people .board__corner {
+  flex-basis: 8rem;
+  width: 8rem;
+}
+
+/* 1人1行。枠のように段を分ける必要はない（同じ人は同時間に1つしか入らない） */
+.res__lanes { min-height: 2.75rem; }
+
+.res__free,
+.res__busy {
+  position: absolute;
+  top: .5rem;
+  height: 1.75rem;
+  border-radius: 4px;
+}
+
+/* 入れると申告された時間 */
+.res__free {
+  background: var(--res-free);
+  border: 1px solid var(--res-free-line);
+}
+
+/* 職員の既定勤務時間帯（本人の申告ではない） */
+.res__free--virtual {
+  background: transparent;
+  border-style: dashed;
+}
+
+/* 割り当て済み。可用の帯に重ねて描く */
+.res__busy {
+  background: var(--accent);
+  color: #fff;
+  font-size: .6875rem;
+  line-height: 1.75rem;
+  padding: 0 .375rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 申告の外に割り当てられている（design.md 6.5 no_availability） */
+.res__busy--warn { background: var(--danger); }
+
+.res__busyLabel { text-overflow: ellipsis; overflow: hidden; display: block; }
+
+.res__idle { color: var(--accent); font-weight: 600; }
+.res__warn { color: var(--danger); }
 
 /* -------------------------------------------------------------- モーダル */
 
@@ -299,6 +409,15 @@ input[type="date"] {
   background: var(--panel);
   border-radius: 12px 12px 0 0;
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 広い画面では余白を広げ、配置表が端から端まで伸びきらないようにする */
+@media (min-width: 40rem) {
+  :root { --gutter: 1.5rem; }
+}
+
+@media (min-width: 64rem) {
+  :root { --gutter: 2.5rem; }
 }
 
 @media (min-width: 40rem) {
@@ -348,6 +467,41 @@ input[type="date"] {
   background: var(--panel);
   color: inherit;
 }
+
+/*
+  時刻の入力（時・分の直接入力）。
+  スマホでは数字キーボードが出るよう inputmode="numeric" を付けている。
+  数値入力のスピナーは幅を食い、指では押しにくいので消す。
+*/
+.timeInput {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  width: 100%;
+}
+
+.timeInput input {
+  font: inherit;
+  width: 100%;
+  min-width: 0;
+  padding: .5rem .25rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: inherit;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+
+.timeInput input::-webkit-outer-spin-button,
+.timeInput input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.timeInput__sep { color: var(--fg-weak); }
 
 .field--row { display: flex; gap: .625rem; }
 .field--row > * { flex: 1; }
@@ -548,17 +702,8 @@ input[type="date"] {
   margin-bottom: .5rem;
 }
 
-.rangeRow select {
-  font: inherit;
-  flex: 1;
-  min-width: 0;
-  padding: .5rem;
-  min-height: 2.75rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
-  color: inherit;
-}
+/* 応募フォームの時間帯の行。開始と終了を同じ幅で並べる */
+.rangeRow .timeInput { flex: 1; min-width: 0; }
 
 .rangeRow__sep { color: var(--fg-weak); }
 .rangeRow__del { flex: 0 0 auto; color: var(--fg-weak); }

@@ -23,6 +23,9 @@ const PUBLIC_CONFIG_KEYS_ = [
   CONFIG_KEY.SLOT_UNIT_MINUTES,
   CONFIG_KEY.STAFF_DEFAULT_START,
   CONFIG_KEY.STAFF_DEFAULT_END,
+  CONFIG_KEY.DEFAULT_SLOT_START,
+  CONFIG_KEY.DEFAULT_SLOT_END,
+  CONFIG_KEY.DEFAULT_SLOT_REQUIRED,
   CONFIG_KEY.PUBLIC_NAME_STYLE
 ];
 
@@ -34,13 +37,12 @@ const PUBLIC_CONFIG_KEYS_ = [
  * 画面の初期化に必要な、日付に依存しないデータを返す。
  * 日付を切り替えても変わらないものだけを置くこと（毎回転送されるため）。
  *
- * @return {{ config: Object, places: Array, operators: Array<string>, templateNames: Array<string> }}
+ * @return {{ config: Object, places: Array, templateNames: Array<string> }}
  */
 function buildBootstrap_() {
   return {
     config: publicConfig_(),
     places: readPlaces_(),
-    operators: parseOperators_(),
     // テンプレート本体は運用者がシートを直接編集する。画面では名前を選ばせるだけなので
     // 名前の一覧だけを渡す
     templateNames: readTemplateNames_()
@@ -69,15 +71,6 @@ function publicConfig_() {
   // 数値として使うものは数値で渡す（クライアント側での Number() を減らす）
   out[CONFIG_KEY.SLOT_UNIT_MINUTES] = Number(out[CONFIG_KEY.SLOT_UNIT_MINUTES]) || 10;
   return out;
-}
-
-/** 操作者名プルダウンの選択肢。`_config` の `operators` をカンマ区切りで持つ */
-function parseOperators_() {
-  const raw = getConfigValue_(CONFIG_KEY.OPERATORS, '');
-  if (!raw) return [];
-  return raw.split(/[,、]/)
-    .map(trimStr_)
-    .filter(function (s) { return s !== ''; });
 }
 
 /**
@@ -132,7 +125,7 @@ function buildDayBoard_(date) {
 
   return {
     date: date,
-    slots: slots,
+    slots: appendDefaultSlots_(slots, date),
     assignments: assignments,
     availability: withVirtual,
     people: people.map(function (p) { return toPublicPerson_(p, nameStyle); }),
@@ -163,9 +156,51 @@ function readSlotsByDate_(date) {
       end_time: s.end_time,
       required_count: s.required_count === null ? 0 : s.required_count,
       staff_required: s.staff_required === null ? 0 : s.staff_required,
-      note: s.note
+      note: s.note,
+      virtual: false
     };
   });
+}
+
+/**
+ * 枠が1つも無い場所に、既定の枠を仮想的に補う（design.md 4.2.2）。
+ *
+ * **シートには書き込まない。** ここは読み取りのAPIであり、閲覧者が日付を送るたびに
+ * 空の枠が実体として増えていくのは事故のもと。職員の既定勤務時間帯を仮想的に補う
+ * `appendStaffDefaultAvailability_` と同じ考え方で、画面の上だけに存在させる。
+ *
+ * 人を入れた時点で `assignToNewSlot` が本物の枠を作る。そこで初めて行が生まれる。
+ *
+ * `default_slot_start` / `default_slot_end` のどちらかを空にすると、この補完は止まる。
+ */
+function appendDefaultSlots_(slots, date) {
+  const start = getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_START, '');
+  const end = getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_END, '');
+  if (!isValidTimeStr_(start) || !isValidTimeStr_(end) || toMinutes_(start) >= toMinutes_(end)) {
+    return slots;
+  }
+  const required = Number(getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_REQUIRED, 1));
+
+  // 既に枠のある場所には出さない。運用が始まっている場所に空の枠を割り込ませない
+  const used = {};
+  slots.forEach(function (s) { used[s.place_id] = true; });
+
+  const out = slots.slice();
+  readPlaces_().forEach(function (p) {
+    if (!p.active || used[p.id]) return;
+    out.push({
+      id: 'virtual:' + p.id + ':' + date,
+      date: date,
+      place_id: p.id,
+      start_time: start,
+      end_time: end,
+      required_count: isFinite(required) && required >= 0 ? required : 0,
+      staff_required: 0,
+      note: '',
+      virtual: true
+    });
+  });
+  return out;
 }
 
 /** place_id → 表示順（並べ替え用） */

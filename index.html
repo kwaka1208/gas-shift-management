@@ -26,28 +26,20 @@
       </div>
       <div class="head__actions">
         <button type="button" class="btn btn--ghost" id="todayBtn">今日</button>
-        <button type="button" class="btn btn--ghost" id="adminBtn">管理モード</button>
       </div>
     </div>
 
-    <!-- 管理モードのときだけ表示される操作列 -->
+    <!-- 管理URL（?view=admin）で開いたときだけ表示される操作列 -->
     <div class="adminBar" id="adminBar" hidden>
-      <label class="toggle">
-        <input type="checkbox" id="editModeToggle">
-        <span>枠を編集</span>
-      </label>
       <div class="adminBar__spacer"></div>
+      <!-- 人の空き状況。日付は今見ている日を引き継ぐ（href は script.html が入れる） -->
+      <a class="btn btn--ghost" id="peopleLink" href="#">人の空き状況</a>
       <button type="button" class="btn btn--ghost" id="placesBtn">場所</button>
-      <button type="button" class="btn btn--ghost" id="generateBtn">テンプレート生成</button>
-      <button type="button" class="btn btn--ghost" id="copyBtn">コピー</button>
-      <button type="button" class="btn btn--ghost" id="logoutBtn">終了</button>
+      <button type="button" class="btn btn--ghost" id="defaultSlotsBtn">既定の枠</button>
     </div>
-    <p class="adminBar__hint" id="editHint" hidden>
-      空いているところをタップすると枠を追加できます。枠をタップすると編集できます。
-    </p>
     <p class="adminBar__hint" id="assignHint" hidden>
       空いているところをタップすると、人を選んで時間を決めるだけで枠ができます。
-      すでにある枠をタップすると、その枠に人を入れられます。
+      すでにある枠をタップすると、人を入れたり枠を編集したりできます。
     </p>
   </header>
 
