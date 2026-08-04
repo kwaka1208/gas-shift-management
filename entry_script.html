@@ -259,7 +259,7 @@
     }
 
     setBusy(true);
-    call('submitAvailability', state.token, payload)
+    submitWithRetry(payload, 0)
       .then(function (data) {
         showReceipt(data);
       })
@@ -268,6 +268,36 @@
         toast('登録できませんでした', true);
       })
       .then(function () { setBusy(false); });
+  }
+
+  /** 混み合って弾かれたときの待ち時間（ミリ秒）。この回数だけ自動で送り直す */
+  const RETRY_WAITS_MS = [2000, 4000, 8000];
+
+  /**
+   * 登録を送る。混み合って弾かれたときだけ、自動で送り直す。
+   *
+   * **送り直してよいのは e.retryable が立っているときだけ。**
+   * この印は、サーバー側がロックを取れずに何も書いていないと分かっている場合にしか
+   * 付かない（api.js の err_ / lockBusyError_）。通信が切れたときのように
+   * 「サーバーでは登録できているかもしれない」場合に送り直すと、
+   * 連絡先が空の人が二重に登録される（findOrCreatePerson_ は毎回作る）。
+   *
+   * 待たされても登録できるほうが、速く諦めさせるより良い。
+   */
+  function submitWithRetry(payload, attempt) {
+    return call('submitAvailability', state.token, payload).catch(function (e) {
+      const wait = RETRY_WAITS_MS[attempt];
+      if (!e || e.retryable !== true || wait === undefined) throw e;
+
+      setBusyRetrying(attempt + 1);
+      return delay(wait).then(function () {
+        return submitWithRetry(payload, attempt + 1);
+      });
+    });
+  }
+
+  function delay(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
   /** 最初に見つかった入力の不備。無ければ null */
@@ -299,6 +329,16 @@
     state.busy = on;
     $('submitBtn').disabled = on;
     $('submitBtn').textContent = on ? '登録しています…' : 'この内容で登録する';
+  }
+
+  /**
+   * 混み合って待っている間の表示。
+   * 何回目かまで出す。**止まったように見せない**ことが目的で、
+   * 黙って待たされると利用者は画面を閉じるか、再読み込みして二重に送る。
+   */
+  function setBusyRetrying(n) {
+    $('submitBtn').textContent =
+      '混み合っています。自動で送り直しています…（' + n + '/' + RETRY_WAITS_MS.length + '）';
   }
 
   // ------------------------------------------------------------ 控え

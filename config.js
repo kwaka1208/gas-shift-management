@@ -165,6 +165,15 @@ const CONFIG_KEY = {
 const LOCK_TIMEOUT_MS = 10000;
 
 /**
+ * 応募受付（submitAvailability）だけの待機時間（ミリ秒）。
+ *
+ * ここは応募が集中する唯一の処理で、**待たされることより登録できないことのほうが
+ * 損害が大きい**（service_entry.js 冒頭）。管理操作は実質1人ずつなので
+ * 待たせる必要がなく、上の10秒のままにしてある。
+ */
+const LOCK_TIMEOUT_ENTRY_MS = 30000;
+
+/**
  * `_log` に残す操作者名。
  *
  * **記名は行わない**（design.md 2）。管理URLを開けば誰でも操作できるため、

@@ -21,11 +21,30 @@ function ok_(data) {
   return { ok: true, data: data === undefined ? null : data };
 }
 
-/** 失敗レスポンス。例外の中身をそのままクライアントへ渡さない */
+/**
+ * 失敗レスポンス。例外の中身をそのままクライアントへ渡さない。
+ *
+ * `retryable` は「サーバー側の処理が1行も走っていない」ことが分かっている
+ * エラーにだけ付く（現状はロック取得の失敗のみ）。画面はこの印がある場合に限って
+ * 自動で送り直す。**それ以外に付けてはいけない。**
+ * 途中まで書いたかもしれない失敗を送り直すと、二重に登録される。
+ */
 function err_(e) {
   const message = (e && e.message) ? e.message : String(e);
   console.error(message + (e && e.stack ? '\n' + e.stack : ''));
-  return { ok: false, error: message };
+  const res = { ok: false, error: message };
+  if (e && e.retryable === true) res.retryable = true;
+  return res;
+}
+
+/**
+ * ロックが取れなかったときのエラー。送り直してよい印を付ける。
+ * ロックを取れていない＝シートには何も書いていないので、再送は安全。
+ */
+function lockBusyError_() {
+  const e = new Error('ただいま混み合っています。少し待ってから、もう一度お試しください。');
+  e.retryable = true;
+  return e;
 }
 
 /**
@@ -48,15 +67,33 @@ function handle_(name, fn) {
  *
  * 読み取りから書き込みまでをロック内に収めることが要点。
  * 外で読んで中で書くと、再検証の意味が無くなる。
+ *
+ * **解放前の `SpreadsheetApp.flush()` を外さないこと。**
+ * シートへの書き込みはバッファされ、実行が終わるまで反映されないことがある。
+ * flush せずにロックを解放すると、次にロックを取った実行が古い状態を読み、
+ *   - insertRows_ が `getLastRow() + 1` を誤り、直前の追記を**上書きする**
+ *   - findOrCreatePerson_ が既存の人を見落として二重に作る
+ * という壊れ方をする。ロックがあっても flush が無ければ排他は成立しない。
+ *
+ * @param {Function} fn ロック内で実行する処理
+ * @param {number=} timeoutMs 待機時間。省略時は LOCK_TIMEOUT_MS（10秒）。
+ *                            応募受付だけは長く待つ（LOCK_TIMEOUT_ENTRY_MS）
  */
-function withLock_(fn) {
+function withLock_(fn, timeoutMs) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(LOCK_TIMEOUT_MS)) {
-    throw new Error('他の操作と重なりました。少し待ってからもう一度お試しください。');
+  if (!lock.tryLock(timeoutMs || LOCK_TIMEOUT_MS)) {
+    throw lockBusyError_();
   }
   try {
     return fn();
   } finally {
+    // 例外で抜けた場合も、途中まで書いた分を確定させてから解放する。
+    // flush 自体の失敗でロックを握ったままにしない
+    try {
+      SpreadsheetApp.flush();
+    } catch (e) {
+      console.error('flush failed: ' + e);
+    }
     lock.releaseLock();
   }
 }
@@ -102,6 +139,10 @@ function getDayBoard(token, date) {
  * **記名は求めない。** 応募者は自分の名前を payload.name に書いており、
  * それ自体が記名になっている。代理入力のときだけ payload.operator が入る。
  *
+ * **ここだけロックを長く待つ**（LOCK_TIMEOUT_ENTRY_MS）。応募が集中する唯一の処理で、
+ * 待たされることより登録できないことのほうが損害が大きい。
+ * それでも取れなかったときは retryable が立ち、画面が自動で送り直す。
+ *
  * @param {string} token 閲覧トークン
  * @param {Object} payload 名前 / 連絡先 / 種別 / days（日付と時間帯の配列）/ 代理入力者
  */
@@ -110,7 +151,7 @@ function submitAvailability(token, payload) {
     requireViewToken_(token);
     return withLock_(function () {
       return submitAvailabilityData_(payload);
-    });
+    }, LOCK_TIMEOUT_ENTRY_MS);
   });
 }
 

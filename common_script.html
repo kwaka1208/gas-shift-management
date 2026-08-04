@@ -24,8 +24,18 @@ const App = (function () {
 
       const runner = google.script.run
         .withSuccessHandler(function (res) {
-          if (res && res.ok) resolve(res.data);
-          else reject(new Error((res && res.error) || '処理できませんでした。'));
+          if (res && res.ok) {
+            resolve(res.data);
+            return;
+          }
+          const e = new Error((res && res.error) || '処理できませんでした。');
+          /*
+            送り直してよい印。サーバー側（api.js の err_）が、処理が1行も
+            走っていないと分かっているエラーにだけ付ける。
+            **呼び出し側でこの印を推測して補ってはいけない。**
+          */
+          if (res && res.retryable === true) e.retryable = true;
+          reject(e);
         })
         /*
           ここへ来るのは、サーバー側の関数に届かなかったときだけ
@@ -34,6 +44,9 @@ const App = (function () {
           実際にはデプロイ設定の誤りが最も多い。「電波」とだけ言うと利用者が
           何度もリロードし続けるので、**原因の見当が付く文言にする。**
           詳細は console にも出す（利用者には見せないが、問い合わせ時に確認できる）。
+
+          ここでは retryable を立てない。サーバーに届かなかったのか、処理が終わった
+          あとに応答を落としたのかを区別できないため、自動で送り直すと二重登録になる。
         */
         .withFailureHandler(function (err) {
           console.error('[' + name + '] google.script.run failed:', err);
