@@ -1,0 +1,80 @@
+<!--
+  index.html … 画面の骨組み
+
+  CSS と JS は style.html / script.html に分けている（CLAUDE.md ファイル構成）。
+  ビルド工程は持ち込まない。素の JS ＋ テンプレートリテラルで DOM を組む（gas.md 6）。
+
+  初期描画は「ローディング表示 → サーバー呼び出し → 描画」の流れに統一する。
+-->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('style'); ?>
+</head>
+<body>
+  <header class="head">
+    <div class="head__row">
+      <div class="dateNav">
+        <button type="button" class="btn btn--icon" id="prevDay" aria-label="前の日">‹</button>
+        <div class="dateNav__label">
+          <input type="date" id="datePicker" aria-label="日付">
+          <span class="dateNav__dow" id="dateDow"></span>
+        </div>
+        <button type="button" class="btn btn--icon" id="nextDay" aria-label="次の日">›</button>
+      </div>
+      <div class="head__actions">
+        <button type="button" class="btn btn--ghost" id="todayBtn">今日</button>
+        <button type="button" class="btn btn--ghost" id="adminBtn">管理モード</button>
+      </div>
+    </div>
+
+    <!-- 管理モードのときだけ表示される操作列 -->
+    <div class="adminBar" id="adminBar" hidden>
+      <label class="toggle">
+        <input type="checkbox" id="editModeToggle">
+        <span>枠を編集</span>
+      </label>
+      <div class="adminBar__spacer"></div>
+      <button type="button" class="btn btn--ghost" id="placesBtn">場所</button>
+      <button type="button" class="btn btn--ghost" id="generateBtn">テンプレート生成</button>
+      <button type="button" class="btn btn--ghost" id="copyBtn">コピー</button>
+      <button type="button" class="btn btn--ghost" id="logoutBtn">終了</button>
+    </div>
+    <p class="adminBar__hint" id="editHint" hidden>
+      空いているところをタップすると枠を追加できます。枠をタップすると編集できます。
+    </p>
+    <p class="adminBar__hint" id="assignHint" hidden>
+      空いているところをタップすると、人を選んで時間を決めるだけで枠ができます。
+      すでにある枠をタップすると、その枠に人を入れられます。
+    </p>
+  </header>
+
+  <main id="main">
+    <div class="loading" id="loading">読み込んでいます…</div>
+    <div id="board" hidden></div>
+  </main>
+
+  <!-- モーダル。中身は script.html が組み立てる -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal__backdrop" data-close="1"></div>
+    <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal__head">
+        <h2 class="modal__title" id="modalTitle"></h2>
+        <button type="button" class="btn btn--icon" data-close="1" aria-label="閉じる">×</button>
+      </div>
+      <div class="modal__body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script>
+    // doGet が埋め込む初期値。業務データは含まない（描画は getDayBoard の結果で行う）
+    const BOOT = <?!= toJsonLiteral_(boot); ?>;
+  </script>
+  <?!= include('common_script'); ?>
+  <?!= include('script'); ?>
+</body>
+</html>

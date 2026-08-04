@@ -1,0 +1,84 @@
+<!--
+  entry.html … 可用性登録フォーム（?view=entry）
+
+  **この画面のわかりやすさが参加率に直結する**（design.md 4.3）。
+  操作に不慣れな人がスマホで開く前提で、項目を増やさず、1画面で完結させる。
+
+  ?view=entry&proxy=1 で開くと代理入力モードになり、種別の選択と入力者の記名が出る。
+  これはセキュリティ境界ではなく、画面を分けるためのもの。
+-->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('style'); ?>
+</head>
+<body>
+  <div class="page">
+    <h1 class="page__title" id="pageTitle">入れる時間帯を教えてください</h1>
+
+    <div class="loading" id="loading">読み込んでいます…</div>
+
+    <!-- 入力 -->
+    <form id="entryForm" hidden autocomplete="on">
+      <p class="formError" hidden></p>
+
+      <div class="field" id="typeField" hidden>
+        <label for="f_type">種別</label>
+        <select id="f_type">
+          <option value="volunteer">ボランティア</option>
+          <option value="staff">職員</option>
+        </select>
+        <p class="hint">職員として登録すると、時間帯の申告がなくても既定の勤務時間帯で扱われます。</p>
+      </div>
+
+      <div class="field">
+        <label for="f_name">お名前 <span class="req">必須</span></label>
+        <input type="text" id="f_name" maxlength="50" autocomplete="name" placeholder="山田 太郎">
+      </div>
+
+      <div class="field">
+        <label for="f_contact">連絡先</label>
+        <input type="text" id="f_contact" maxlength="100" autocomplete="tel"
+               placeholder="電話番号またはメールアドレス">
+        <p class="hint">連絡が必要なときに使います。次回同じ内容で登録すると、同じ方として扱えます。</p>
+      </div>
+
+      <div class="field">
+        <label for="f_date">日付 <span class="req">必須</span></label>
+        <input type="date" id="f_date">
+      </div>
+
+      <div class="field">
+        <label>入れる時間帯 <span class="req">必須</span></label>
+        <div id="rangeList"></div>
+        <div class="rangeActions">
+          <button type="button" class="btn" id="addRange">＋ 時間帯を追加</button>
+          <button type="button" class="btn" id="allDay">終日OK</button>
+        </div>
+        <p class="hint">午前と午後だけなど、離れた時間帯もそれぞれ追加できます。</p>
+      </div>
+
+      <div class="field" id="operatorField" hidden>
+        <label for="f_operator">入力した人</label>
+        <span id="operatorInput"></span>
+        <p class="hint">代理で入力した記録として残します。</p>
+      </div>
+
+      <button type="submit" class="btn btn--primary btn--block" id="submitBtn">この内容で登録する</button>
+    </form>
+
+    <!-- 送信後の控え -->
+    <div id="receipt" hidden></div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script>
+    const BOOT = <?!= toJsonLiteral_(boot); ?>;
+  </script>
+  <?!= include('common_script'); ?>
+  <?!= include('entry_script'); ?>
+</body>
+</html>

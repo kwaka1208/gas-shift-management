@@ -1,0 +1,630 @@
+<style>
+/*
+  style.html … 画面のスタイル
+
+  スマホでの利用が前提（要件 5）。基準はスマホ幅、広い画面は上書きで調整する。
+  タップ対象は 44px 以上を確保する。ドラッグ&ドロップは使わない（要件 5）。
+*/
+
+:root {
+  --fg: #1f2328;
+  --fg-weak: #656d76;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --line: #d9dde2;
+  --grid: #e9ecef;
+  --accent: #1a6fd4;
+  --accent-weak: #e8f1fc;
+  --danger: #b3261e;
+  --slot-bg: #eef2f7;
+  --slot-line: #b9c4d2;
+
+  --place-w: 6rem;
+  --hour-w: 5rem;      /* 1時間あたりの最小幅。狭い画面では横スクロールになる */
+  --block-h: 3.25rem;  /* 時刻・人数・氏名の3行が入る高さ */
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
+/*
+  display を指定した要素では、ブラウザ既定の [hidden]{display:none} が負けてしまう。
+  hidden 属性で表示を切り替えている箇所（管理モード列・モーダル等）が常時表示になるため、
+  ここで明示的に打ち消す。
+*/
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---------------------------------------------------------------- ヘッダー */
+
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: .5rem .625rem;
+}
+
+.head__row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.head__actions {
+  margin-left: auto;
+  display: flex;
+  gap: .375rem;
+}
+
+.dateNav {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+}
+
+.dateNav__label {
+  display: flex;
+  align-items: baseline;
+  gap: .375rem;
+}
+
+.dateNav__dow {
+  font-size: .8125rem;
+  color: var(--fg-weak);
+  min-width: 2.5em;
+}
+
+input[type="date"] {
+  font: inherit;
+  font-size: 1rem;
+  padding: .25rem .375rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: inherit;
+  min-height: 2.25rem;
+}
+
+/* ------------------------------------------------------------ 管理モード列 */
+
+.adminBar {
+  display: flex;
+  align-items: center;
+  gap: .375rem;
+  margin-top: .5rem;
+  padding-top: .5rem;
+  border-top: 1px dashed var(--line);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.adminBar__spacer { flex: 1 0 .25rem; }
+
+.adminBar__hint {
+  margin: .5rem 0 0;
+  font-size: .8125rem;
+  color: var(--fg-weak);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+  white-space: nowrap;
+  padding: .25rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  min-height: 2.25rem;
+}
+
+.toggle input { width: 1.1rem; height: 1.1rem; margin: 0; }
+.toggle:has(input:checked) { background: var(--accent-weak); border-color: var(--accent); }
+
+/* ------------------------------------------------------------------ ボタン */
+
+.btn {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: .375rem .75rem;
+  min-height: 2.25rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:disabled { opacity: .5; cursor: default; }
+.btn--ghost { background: transparent; }
+.btn--icon { padding: .375rem .625rem; font-size: 1.125rem; line-height: 1; }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn--danger { color: var(--danger); border-color: #e6c3c0; }
+
+/* -------------------------------------------------------------- 配置表本体 */
+
+.loading, .empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--fg-weak);
+}
+
+.board { padding: .5rem 0 4rem; }
+
+.board__scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/*
+  min-width: max-content が要点。これが無いと各行の幅がスクロール領域の幅どまりになり、
+  場所の列に position: sticky が効かない（横スクロールで左へ流れてしまう）。
+  width: 100% は、内容が狭いときに広い画面いっぱいへ広げるため。
+*/
+.board__inner {
+  width: 100%;
+  min-width: max-content;
+}
+
+.board__axisRow, .board__row { display: flex; align-items: stretch; }
+
+/* 場所の列は横スクロールしても左に貼り付く */
+.board__place, .board__corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 var(--place-w);
+  width: var(--place-w);
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+  padding: .375rem .5rem;
+  font-size: .8125rem;
+  overflow-wrap: anywhere;
+}
+
+.board__corner { background: var(--bg); }
+
+.board__place--off { color: var(--fg-weak); }
+
+.board__place small {
+  display: block;
+  color: var(--fg-weak);
+  font-size: .6875rem;
+}
+
+/*
+  時間軸と枠の帯は同じ幅・同じ基準で並ぶ。
+  1時間ごとの目盛りは背景のグラデーションで描く（10分刻みのセルを敷き詰めない）。
+*/
+.board__axis, .board__lanes {
+  flex: 1 1 auto;
+  position: relative;
+  min-width: calc(var(--hours) * var(--hour-w));
+}
+
+.board__axis {
+  height: 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.board__tick {
+  position: absolute;
+  top: 0;
+  font-size: .6875rem;
+  color: var(--fg-weak);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 両端の目盛りは、中央揃えのままだと画面外へはみ出す */
+.board__tick--first { transform: none; }
+.board__tick--last { transform: translateX(-100%); }
+
+.board__row + .board__row { border-top: 1px solid var(--line); }
+
+.board__lanes {
+  background-image: linear-gradient(to right, var(--grid) 0 1px, transparent 1px);
+  background-size: calc(100% / var(--hours)) 100%;
+  padding: .25rem 0;
+}
+
+.board__lanes--editable,
+.board__lanes--assignable { cursor: copy; }
+
+/* -------------------------------------------------------------------- 枠 */
+
+.slot {
+  position: absolute;
+  height: var(--block-h);
+  background: var(--slot-bg);
+  border: 1px solid var(--slot-line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: .125rem .375rem;
+  font-size: .75rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: default;
+}
+
+.slot--editable, .slot--assignable { cursor: pointer; }
+.slot--editable:hover, .slot--assignable:hover { background: #e4eaf1; }
+
+.slot__time { display: block; font-weight: 600; white-space: nowrap; }
+.slot__meta { display: block; color: var(--fg-weak); white-space: nowrap; }
+.slot__note { color: var(--fg-weak); }
+
+/* 割り当て済みの氏名。枠が狭いときは切れるが、人数は .slot__meta で分かる */
+.slot__names {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* -------------------------------------------------------------- モーダル */
+
+.modal { position: fixed; inset: 0; z-index: 50; }
+
+.modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .35);
+}
+
+.modal__panel {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(32rem, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border-radius: 12px 12px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (min-width: 40rem) {
+  .modal__panel {
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    border-radius: 12px;
+  }
+}
+
+.modal__head {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .75rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal__title { margin: 0; font-size: 1rem; }
+.modal__head .btn { margin-left: auto; }
+.modal__body { padding: 1rem; }
+
+/* ---------------------------------------------------------------- フォーム */
+
+.field { margin-bottom: .875rem; }
+
+.field > label {
+  display: block;
+  font-size: .8125rem;
+  color: var(--fg-weak);
+  margin-bottom: .25rem;
+}
+
+/* 入力の種類ごとに列挙すると漏れる（password が抜けて幅が崩れた）。まとめて指定する */
+.field input,
+.field select {
+  font: inherit;
+  width: 100%;
+  padding: .5rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: inherit;
+}
+
+.field--row { display: flex; gap: .625rem; }
+.field--row > * { flex: 1; }
+
+.formActions {
+  display: flex;
+  gap: .5rem;
+  margin-top: 1.25rem;
+  padding-top: .875rem;
+  border-top: 1px solid var(--line);
+}
+
+.formActions__spacer { flex: 1; }
+
+.formError {
+  margin: 0 0 .875rem;
+  padding: .625rem .75rem;
+  background: #fdf0ef;
+  border: 1px solid #e6c3c0;
+  border-radius: var(--radius);
+  color: var(--danger);
+  font-size: .8125rem;
+  white-space: pre-wrap;
+}
+
+.hint { font-size: .8125rem; color: var(--fg-weak); margin: .25rem 0 0; }
+
+/* ------------------------------------------------------------ 場所の一覧 */
+
+.placeList { list-style: none; margin: 0 0 .75rem; padding: 0; }
+
+.placeList li {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .375rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.placeList input[type="text"] { flex: 1; min-width: 0; }
+.placeList .order { flex: 0 0 3.5rem; }
+
+.placeList .toggle {
+  border: none;
+  padding: .25rem;
+  font-size: .75rem;
+  color: var(--fg-weak);
+}
+
+/* -------------------------------------------------------- 割り当てパネル */
+
+.panelHead {
+  margin: 0 0 .25rem;
+  font-weight: 600;
+}
+
+.panelHead__staff {
+  margin: 0 0 .5rem;
+  font-size: .8125rem;
+  color: var(--fg-weak);
+}
+
+.assignSec { margin-top: 1.25rem; }
+
+.assignSec h3 {
+  margin: 0 0 .375rem;
+  font-size: .875rem;
+  padding-bottom: .25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.assignSec h4 {
+  margin: .75rem 0 .25rem;
+  font-size: .75rem;
+  color: var(--fg-weak);
+  font-weight: 600;
+}
+
+/* 部分可用は控えめに（design.md 4.2）。既定は閉じている */
+.assignSec--sub summary {
+  font-size: .8125rem;
+  color: var(--fg-weak);
+  cursor: pointer;
+  padding: .375rem 0;
+}
+
+.empty--sm { padding: .75rem 0; text-align: left; font-size: .8125rem; }
+
+.pList { list-style: none; margin: 0; padding: 0; }
+
+/*
+  行そのものをタップ対象にする。指で押しやすいよう 44px を確保する（要件 5）。
+*/
+.pRow {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: .375rem .25rem;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.pRow--pick { cursor: pointer; }
+.pRow--pick:hover { background: var(--accent-weak); }
+.pRow--pick:disabled { opacity: .5; cursor: default; }
+
+.pName { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+.pLoad {
+  flex: 0 0 auto;
+  font-size: .75rem;
+  color: var(--fg-weak);
+  white-space: nowrap;
+}
+
+.pAdd {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.pTag {
+  flex: 0 0 auto;
+  font-size: .6875rem;
+  color: var(--fg-weak);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 .25rem;
+  white-space: nowrap;
+}
+
+.pTag--staff { color: var(--accent); border-color: var(--accent); }
+
+.pPending { flex: 0 0 auto; font-size: .75rem; color: var(--fg-weak); }
+
+.btn--small { min-height: 2rem; padding: .25rem .625rem; font-size: .8125rem; }
+
+/* パネルの下に置く副操作（「時間を指定して入れる」） */
+.btn--sub {
+  margin-top: 1.25rem;
+  font-size: .875rem;
+  color: var(--accent);
+  border-style: dashed;
+}
+
+/* 登録は止めないが、目に入れてほしい注意 */
+.warnLine {
+  margin: .25rem 0 0;
+  padding: .5rem .625rem;
+  background: #fff8e1;
+  border: 1px solid #e6d8a8;
+  border-radius: var(--radius);
+  font-size: .8125rem;
+}
+
+/* -------------------------------------------------- 応募フォーム（entry） */
+
+.page {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 4rem;
+}
+
+.page__title {
+  font-size: 1.125rem;
+  margin: .5rem 0 1.25rem;
+}
+
+.req {
+  font-size: .6875rem;
+  color: var(--danger);
+  border: 1px solid #e6c3c0;
+  border-radius: 4px;
+  padding: 0 .25rem;
+  margin-left: .25rem;
+  vertical-align: middle;
+}
+
+.btn--block {
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+  font-size: 1rem;
+  margin-top: 1.5rem;
+}
+
+.rangeRow {
+  display: flex;
+  align-items: center;
+  gap: .375rem;
+  margin-bottom: .5rem;
+}
+
+.rangeRow select {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  padding: .5rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: inherit;
+}
+
+.rangeRow__sep { color: var(--fg-weak); }
+.rangeRow__del { flex: 0 0 auto; color: var(--fg-weak); }
+
+.rangeActions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .25rem;
+}
+
+.rangeActions .btn { flex: 1; }
+
+/* ---------------------------------------------------------------- 控え */
+
+.receipt {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.25rem 1rem;
+}
+
+.receipt__badge {
+  margin: 0 0 1rem;
+  font-weight: 700;
+  color: #1b5e20;
+  background: #e8f5e9;
+  border-radius: var(--radius);
+  padding: .625rem .75rem;
+  text-align: center;
+}
+
+.receipt__list { margin: 0; }
+.receipt__list dt { font-size: .8125rem; color: var(--fg-weak); }
+.receipt__list dd { margin: 0 0 .875rem; font-size: 1.0625rem; }
+
+.receipt__times { list-style: none; margin: 0; padding: 0; }
+.receipt__times li { font-variant-numeric: tabular-nums; }
+
+.receipt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.receipt__actions .btn { flex: 1 1 9rem; }
+
+/* ------------------------------------------------------------------ トースト */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(28rem, calc(100% - 2rem));
+  padding: .625rem 1rem;
+  border-radius: var(--radius);
+  background: #1f2328;
+  color: #fff;
+  font-size: .875rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .2);
+  white-space: pre-wrap;
+}
+
+.toast--error { background: var(--danger); }
+</style>

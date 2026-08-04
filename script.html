@@ -1,0 +1,1292 @@
+<script>
+/*
+  script.html … 画面のロジック
+
+  方針（gas.md 6 / CLAUDE.md 開発ルール）
+    - フレームワークを使わない。素の JS ＋ テンプレートリテラルで DOM を組む
+    - サーバー呼び出しは画面単位で1回。日付を切り替えたときは getDayBoard だけを呼ぶ
+    - google.script.run は必ず成功・失敗の両ハンドラを付ける
+    - 送信中はボタンを無効化して二重送信を防ぐ
+*/
+
+(function () {
+  'use strict';
+
+  const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+
+  // ---------------------------------------------------------------- 状態
+  /*
+    管理モードは認証ではない。「操作する人を記名したかどうか」でしかない。
+    サーバー側も閲覧トークンしか見ないため、この状態はUIの切り替えにすぎない。
+  */
+  const state = {
+    token: BOOT.token,
+    date: BOOT.date,
+    config: null,
+    places: [],
+    operators: [],
+    templateNames: [],
+    slots: [],
+    assignments: [],
+    people: [],
+    availability: [],
+    peopleById: {},
+    adminMode: false,
+    operator: '',
+    editMode: false,
+    busy: false
+  };
+
+  const $ = function (id) { return document.getElementById(id); };
+
+  // 共通処理は common_script.html（App）から借りる
+  const call = App.call;
+  const esc = App.esc;
+  const toMin = App.toMin;
+  const toHHMM = App.toHHMM;
+  const addDays = App.addDays;
+  const dowOf = App.dowOf;
+  const todayStr = App.todayStr;
+  const toast = App.toast;
+
+  // -------------------------------------------------- 操作者名の保存場所
+  /*
+    sessionStorage が使えない環境（プライベートブラウズ等）ではメモリに持つ。
+    その場合はリロードで名前の再入力になるが、動作は止めない。
+  */
+  const memoryStore = {};
+  const store = {
+    get: function (key) {
+      try { return sessionStorage.getItem(key); } catch (e) { return memoryStore[key] || null; }
+    },
+    set: function (key, value) {
+      try { sessionStorage.setItem(key, value); } catch (e) { memoryStore[key] = value; }
+    },
+    remove: function (key) {
+      try { sessionStorage.removeItem(key); } catch (e) { delete memoryStore[key]; }
+    }
+  };
+
+  // ------------------------------------------------------------ モーダル
+
+  function openModal(title, bodyHtml) {
+    $('modalTitle').textContent = title;
+    $('modalBody').innerHTML = bodyHtml;
+    $('modal').hidden = false;
+  }
+
+  function closeModal() {
+    $('modal').hidden = true;
+    $('modalBody').innerHTML = '';
+  }
+
+  $('modal').addEventListener('click', function (e) {
+    if (e.target.dataset && e.target.dataset.close) closeModal();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !$('modal').hidden) closeModal();
+  });
+
+  function showFormError(message) {
+    const box = document.querySelector('#modalBody .formError');
+    if (!box) return;
+    box.textContent = message;
+    box.hidden = false;
+    box.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** 送信中はモーダル内のボタンをすべて無効化する（二重送信の防止） */
+  function setBusy(on) {
+    state.busy = on;
+    document.querySelectorAll('#modalBody button').forEach(function (b) { b.disabled = on; });
+  }
+
+  // ------------------------------------------------------------ 起動
+
+  function boot() {
+    state.operator = store.get('shift.operator') || '';
+    $('datePicker').value = state.date;
+
+    Promise.all([
+      call('getBootstrap', state.token),
+      call('getDayBoard', state.token, state.date)
+    ]).then(function (res) {
+      applyBootstrap(res[0]);
+      applyDayBoard(res[1]);
+      $('loading').hidden = true;
+      $('board').hidden = false;
+      render();
+    }).catch(function (e) {
+      $('loading').textContent = e.message;
+    });
+  }
+
+  function applyBootstrap(data) {
+    state.config = data.config;
+    state.places = data.places;
+    state.operators = data.operators;
+    state.templateNames = data.templateNames || [];
+  }
+
+  /*
+    getDayBoard はその日の描画と候補者計算に必要な全部を1回で返す（CLAUDE.md 開発ルール）。
+    候補者の絞り込みはここから先、クライアント側だけで計算する。サーバーへ聞き直さない。
+  */
+  function applyDayBoard(data) {
+    state.date = data.date;
+    state.slots = data.slots;
+    state.assignments = data.assignments || [];
+    state.people = data.people || [];
+    state.availability = data.availability || [];
+    indexPeople();
+  }
+
+  function indexPeople() {
+    const map = {};
+    state.people.forEach(function (p) { map[p.id] = p; });
+    state.peopleById = map;
+  }
+
+  /** 指定日を読み込み直す */
+  function loadDay(date) {
+    $('loading').textContent = '読み込んでいます…';
+    $('loading').hidden = false;
+    $('board').hidden = true;
+    return call('getDayBoard', state.token, date).then(function (data) {
+      applyDayBoard(data);
+      $('datePicker').value = state.date;
+      $('loading').hidden = true;
+      $('board').hidden = false;
+      render();
+    }).catch(function (e) {
+      $('loading').textContent = e.message;
+      toast(e.message, true);
+    });
+  }
+
+  // ------------------------------------------------------------ 描画
+
+  function render() {
+    renderHeader();
+    renderBoard();
+  }
+
+  function renderHeader() {
+    $('dateDow').textContent = '(' + DOW[dowOf(state.date)] + ')';
+    // 記名が唯一の手がかりなので、誰として操作中かを常に見えるようにする
+    $('adminBtn').textContent = state.adminMode ? state.operator + 'さん' : '管理モード';
+    $('adminBar').hidden = !state.adminMode;
+    $('editHint').hidden = !(state.adminMode && state.editMode);
+    $('assignHint').hidden = !(state.adminMode && !state.editMode);
+    $('editModeToggle').checked = state.editMode;
+  }
+
+  /**
+   * 配置表を描く。
+   *
+   * **10分刻みのセルを敷き詰めない。** 目盛りは背景で描き、枠は開始・終了から
+   * 幅を計算して絶対配置する（roadmap Phase 1 受け入れ条件）。
+   */
+  function renderBoard() {
+    const cfg = state.config;
+    const dayStart = toMin(cfg.day_start);
+    const dayEnd = toMin(cfg.day_end);
+    const total = dayEnd - dayStart;
+
+    if (total <= 0) {
+      $('board').innerHTML = '<p class="empty">表示時間帯の設定が正しくありません（_config の day_start / day_end）。</p>';
+      return;
+    }
+
+    const places = visiblePlaces();
+    if (places.length === 0) {
+      $('board').innerHTML = '<p class="empty">場所が登録されていません。' +
+        (state.adminMode ? '「場所」から登録してください。' : '') + '</p>';
+      return;
+    }
+
+    const slotsByPlace = {};
+    state.slots.forEach(function (s) {
+      (slotsByPlace[s.place_id] = slotsByPlace[s.place_id] || []).push(s);
+    });
+
+    const rows = places.map(function (p) {
+      return renderPlaceRow(p, slotsByPlace[p.id] || [], dayStart, total);
+    }).join('');
+
+    $('board').innerHTML =
+      '<div class="board">' +
+        '<div class="board__scroll">' +
+          '<div class="board__inner" style="--hours:' + (total / 60) + '">' +
+            '<div class="board__axisRow">' +
+              '<div class="board__corner"></div>' +
+              '<div class="board__axis">' + renderTicks(dayStart, dayEnd, total) + '</div>' +
+            '</div>' +
+            rows +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    if (state.adminMode && state.editMode) {
+      document.querySelectorAll('.board__lanes').forEach(function (el) {
+        el.addEventListener('click', onLanesClick);
+      });
+      document.querySelectorAll('.slot--editable').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openSlotModal(el.dataset.id);
+        });
+      });
+    }
+
+    if (state.adminMode && !state.editMode) {
+      document.querySelectorAll('.board__lanes').forEach(function (el) {
+        el.addEventListener('click', onLanesClickAssign);
+      });
+      document.querySelectorAll('.slot--assignable').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openAssignPanel(el.dataset.id);
+        });
+      });
+    }
+  }
+
+  /** 表示する場所。廃止済みでも、その日の枠が残っていれば表示する */
+  function visiblePlaces() {
+    const used = {};
+    state.slots.forEach(function (s) { used[s.place_id] = true; });
+    return state.places.filter(function (p) { return p.active || used[p.id]; });
+  }
+
+  function renderTicks(dayStart, dayEnd, total) {
+    let html = '';
+    for (let m = dayStart; m <= dayEnd; m += 60) {
+      const left = (m - dayStart) / total * 100;
+      // 両端はラベルが画面外へはみ出すため、寄せ方を変える
+      const edge = m === dayStart ? ' board__tick--first'
+        : (m + 60 > dayEnd ? ' board__tick--last' : '');
+      html += '<span class="board__tick' + edge +
+        '" style="left:' + left + '%">' + toHHMM(m) + '</span>';
+    }
+    return html;
+  }
+
+  function renderPlaceRow(place, slots, dayStart, total) {
+    const dayEnd = dayStart + total;
+    const inRange = [];
+    let outCount = 0;
+
+    slots.forEach(function (s) {
+      if (toMin(s.end_time) <= dayStart || toMin(s.start_time) >= dayEnd) outCount++;
+      else inRange.push(s);
+    });
+
+    const lanes = assignLanes(inRange);
+    const laneCount = Math.max(1, lanes.count);
+    const minHeight = 'calc(.5rem + ' + laneCount + ' * var(--block-h) + ' + (laneCount - 1) + ' * .25rem)';
+
+    const blocks = lanes.items.map(function (item) {
+      return renderSlot(item.slot, item.lane, dayStart, total);
+    }).join('');
+
+    const editable = state.adminMode && state.editMode;
+    // 割り当てモードでも空いているところをタップできる（枠はそのとき作られる）
+    const assignable = state.adminMode && !state.editMode;
+
+    return '<div class="board__row">' +
+      '<div class="board__place' + (place.active ? '' : ' board__place--off') + '">' +
+        esc(place.name) +
+        (place.active ? '' : '<small>（廃止）</small>') +
+        (outCount > 0 ? '<small>表示範囲外 ' + outCount + '件</small>' : '') +
+      '</div>' +
+      '<div class="board__lanes' + (editable ? ' board__lanes--editable' : '') +
+        (assignable ? ' board__lanes--assignable' : '') + '"' +
+        ' data-place="' + esc(place.id) + '" style="min-height:' + minHeight + '">' +
+        blocks +
+      '</div>' +
+    '</div>';
+  }
+
+  /**
+   * 重なり合う枠を段に振り分ける。
+   * 同じ場所に時間の重なる枠を作れる仕様のため、重ねずに読めるようにする。
+   */
+  function assignLanes(slots) {
+    const sorted = slots.slice().sort(function (a, b) {
+      if (a.start_time !== b.start_time) return a.start_time < b.start_time ? -1 : 1;
+      return a.end_time < b.end_time ? -1 : 1;
+    });
+    const laneEnds = [];
+    const items = sorted.map(function (s) {
+      const start = toMin(s.start_time);
+      const end = toMin(s.end_time);
+      let lane = laneEnds.findIndex(function (e) { return e <= start; });
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(end);
+      } else {
+        laneEnds[lane] = end;
+      }
+      return { slot: s, lane: lane };
+    });
+    return { items: items, count: laneEnds.length };
+  }
+
+  function renderSlot(slot, lane, dayStart, total) {
+    const dayEnd = dayStart + total;
+    const start = Math.max(toMin(slot.start_time), dayStart);
+    const end = Math.min(toMin(slot.end_time), dayEnd);
+    const left = (start - dayStart) / total * 100;
+    const width = (end - start) / total * 100;
+    const top = 'calc(.25rem + ' + lane + ' * (var(--block-h) + .25rem))';
+
+    const editable = state.adminMode && state.editMode;
+    // 編集モードでない管理モードは「割り当てモード」。枠をタップすると割り当てパネルが開く
+    const assignable = state.adminMode && !state.editMode;
+    const tag = (editable || assignable) ? 'button' : 'div';
+
+    const list = assignmentsOfSlot(slot.id);
+    const staffCount = list.filter(function (a) { return isStaff(a.person_id); }).length;
+    // 色分け（design.md 6.4）は Phase 4。ここでは数と名前だけを出す
+    const meta = list.length + '/' + slot.required_count + '名' +
+      (slot.staff_required > 0 ? '（職員' + staffCount + '/' + slot.staff_required + '）' : '');
+    const names = list.map(function (a) {
+      return personName(a.person_id) + (isStaff(a.person_id) ? '（職）' : '');
+    }).join('、');
+
+    return '<' + tag + ((editable || assignable) ? ' type="button"' : '') +
+      ' class="slot' + (editable ? ' slot--editable' : '') + (assignable ? ' slot--assignable' : '') + '"' +
+      ' data-id="' + esc(slot.id) + '"' +
+      ' style="left:' + left + '%;width:' + width + '%;top:' + top + '">' +
+      '<span class="slot__time">' + esc(slot.start_time) + '–' + esc(slot.end_time) + '</span>' +
+      '<span class="slot__meta">' + esc(meta) +
+        (slot.note ? ' <span class="slot__note">' + esc(slot.note) + '</span>' : '') +
+      '</span>' +
+      (names ? '<span class="slot__names">' + esc(names) + '</span>' : '') +
+    '</' + tag + '>';
+  }
+
+  /** 空いているところをタップしたら、その時刻から新しい枠を作る（枠を編集モード） */
+  function onLanesClick(e) {
+    const preset = presetFromClick(e);
+    if (preset) openSlotModal(null, preset);
+  }
+
+  /**
+   * 空いているところをタップしたら、そこに人を入れる（割り当てモード）。
+   * 枠はこの操作の中で作られる。先に枠を用意しておく必要はない。
+   */
+  function onLanesClickAssign(e) {
+    const preset = presetFromClick(e);
+    if (preset) openNewAssignPanel(preset.place_id, preset);
+  }
+
+  /** タップ位置から、場所と仮の時間帯を割り出す */
+  function presetFromClick(e) {
+    if (e.target.closest('.slot')) return null;
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const cfg = state.config;
+    const dayStart = toMin(cfg.day_start);
+    const dayEnd = toMin(cfg.day_end);
+    const unit = cfg.slot_unit_minutes || 10;
+
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    let start = dayStart + Math.floor((dayEnd - dayStart) * ratio / unit) * unit;
+    if (start >= dayEnd) start = dayEnd - unit;
+    const end = Math.min(start + 60, dayEnd);
+
+    return {
+      place_id: el.dataset.place,
+      start_time: toHHMM(start),
+      end_time: toHHMM(end)
+    };
+  }
+
+  // ------------------------------------------------------- 枠の編集モーダル
+
+  /** 表示時間帯の外にある既存の枠でも、値が消えないようにしてある（App.timeOptions） */
+  function timeOptions(selected) {
+    const cfg = state.config;
+    return App.timeOptions(toMin(cfg.day_start), toMin(cfg.day_end),
+      cfg.slot_unit_minutes || 10, selected);
+  }
+
+  function placeOptions(selected) {
+    return state.places.filter(function (p) { return p.active || p.id === selected; })
+      .map(function (p) {
+        return '<option value="' + esc(p.id) + '"' + (p.id === selected ? ' selected' : '') + '>' +
+          esc(p.name) + (p.active ? '' : '（廃止）') + '</option>';
+      }).join('');
+  }
+
+  function openSlotModal(slotId, preset) {
+    const slot = slotId
+      ? state.slots.filter(function (s) { return s.id === slotId; })[0]
+      : Object.assign({ required_count: 1, staff_required: 0, note: '' }, preset);
+    if (!slot) return;
+
+    openModal(slotId ? '枠を編集' : '枠を追加',
+      '<p class="formError" hidden></p>' +
+      '<div class="field"><label for="f_place">場所</label>' +
+        '<select id="f_place">' + placeOptions(slot.place_id) + '</select></div>' +
+      '<div class="field field--row">' +
+        '<div><label for="f_start">開始</label>' +
+          '<select id="f_start">' + timeOptions(slot.start_time) + '</select></div>' +
+        '<div><label for="f_end">終了</label>' +
+          '<select id="f_end">' + timeOptions(slot.end_time) + '</select></div>' +
+      '</div>' +
+      '<div class="field field--row">' +
+        '<div><label for="f_required">必要人数</label>' +
+          '<input type="number" id="f_required" min="0" step="1" value="' + Number(slot.required_count) + '"></div>' +
+        '<div><label for="f_staff">うち職員（最低）</label>' +
+          '<input type="number" id="f_staff" min="0" step="1" value="' + Number(slot.staff_required) + '"></div>' +
+      '</div>' +
+      '<div class="field"><label for="f_note">メモ（任意）</label>' +
+        '<input type="text" id="f_note" value="' + esc(slot.note) + '" maxlength="100"></div>' +
+      '<div class="formActions">' +
+        (slotId ? '<button type="button" class="btn btn--danger" id="f_delete">削除</button>' : '') +
+        '<div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">キャンセル</button>' +
+        '<button type="button" class="btn btn--primary" id="f_save">保存</button>' +
+      '</div>');
+
+    $('f_save').addEventListener('click', function () {
+      const edited = {
+        id: slotId || '',
+        place_id: $('f_place').value,
+        start_time: $('f_start').value,
+        end_time: $('f_end').value,
+        required_count: $('f_required').value,
+        staff_required: $('f_staff').value,
+        note: $('f_note').value
+      };
+      // クライアント側の検証は入力補助。判定はサーバー側が本体
+      if (toMin(edited.start_time) >= toMin(edited.end_time)) {
+        showFormError('終了時刻は開始時刻より後にしてください。');
+        return;
+      }
+      const next = state.slots.filter(function (s) { return s.id !== slotId; }).concat([edited]);
+      submitSlots(next, '保存しました');
+    });
+
+    if (slotId) {
+      $('f_delete').addEventListener('click', function () {
+        const next = state.slots.filter(function (s) { return s.id !== slotId; });
+        submitSlots(next, '削除しました');
+      });
+    }
+  }
+
+  /**
+   * その日の枠を丸ごと保存する。
+   * 割り当てのある枠を消そうとした場合など、サーバー側で拒否されることがあるため、
+   * 楽観的更新はせず、結果を受け取ってから描き直す。
+   */
+  function submitSlots(slots, successMessage) {
+    if (state.busy) return;
+    setBusy(true);
+    call('saveSlots', state.token, state.date, slots, state.operator)
+      .then(function (data) {
+        state.slots = data.slots;
+        closeModal();
+        render();
+        toast(successMessage);
+      })
+      .catch(function (e) {
+        showFormError(e.message);
+      })
+      .then(function () { setBusy(false); });
+  }
+
+  // ------------------------------------------------------- 場所の管理
+
+  function openPlacesModal() {
+    openModal('場所の管理',
+      '<p class="formError" hidden></p>' +
+      '<ul class="placeList" id="placeList">' + state.places.map(placeRowHtml).join('') + '</ul>' +
+      '<button type="button" class="btn" id="p_add">＋ 場所を追加</button>' +
+      '<p class="hint">チェックを外すと配置表に表示されなくなります。' +
+        '過去の配置表を保つため、行そのものは残ります。</p>' +
+      '<div class="formActions">' +
+        '<div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">キャンセル</button>' +
+        '<button type="button" class="btn btn--primary" id="p_save">保存</button>' +
+      '</div>');
+
+    $('p_add').addEventListener('click', function () {
+      const order = $('placeList').children.length + 1;
+      $('placeList').insertAdjacentHTML('beforeend',
+        placeRowHtml({ id: '', name: '', sort_order: order, active: true }));
+    });
+
+    $('p_save').addEventListener('click', function () {
+      if (state.busy) return;
+      const places = Array.prototype.map.call($('placeList').children, function (li) {
+        return {
+          id: li.dataset.id,
+          name: li.querySelector('.name').value,
+          sort_order: li.querySelector('.order').value,
+          active: li.querySelector('.active').checked
+        };
+      }).filter(function (p) { return p.id || p.name.trim() !== ''; });
+
+      setBusy(true);
+      call('savePlaces', state.token, places, state.operator)
+        .then(function (data) {
+          state.places = data.places;
+          closeModal();
+          render();
+          toast('保存しました');
+        })
+        .catch(function (e) {
+          showFormError(e.message);
+        })
+        .then(function () { setBusy(false); });
+    });
+  }
+
+  function placeRowHtml(p) {
+    return '<li data-id="' + esc(p.id) + '">' +
+      '<input type="number" class="order" value="' + Number(p.sort_order || 0) + '" aria-label="表示順">' +
+      '<input type="text" class="name" value="' + esc(p.name) + '" placeholder="場所名" aria-label="場所名">' +
+      '<label class="toggle"><input type="checkbox" class="active"' + (p.active ? ' checked' : '') +
+        '><span>表示</span></label>' +
+    '</li>';
+  }
+
+  // ------------------------------------------------- テンプレートからの生成
+
+  function openGenerateModal() {
+    if (state.templateNames.length === 0) {
+      openModal('テンプレートから生成',
+        '<p>テンプレートが登録されていません。</p>' +
+        '<p class="hint">スプレッドシートの <b>slot_templates</b> シートに、' +
+        'template_name / day_of_week（0=日〜6=土） / place_id / start_time / end_time / ' +
+        'required_count / staff_required を入力してください。</p>' +
+        '<div class="formActions"><div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">閉じる</button></div>');
+      return;
+    }
+
+    openModal('テンプレートから生成',
+      '<p class="formError" hidden></p>' +
+      '<div class="field"><label for="g_name">テンプレート</label>' +
+        '<select id="g_name">' + state.templateNames.map(function (n) {
+          return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
+        }).join('') + '</select></div>' +
+      '<div class="field field--row">' +
+        '<div><label for="g_from">開始日</label>' +
+          '<input type="date" id="g_from" value="' + state.date + '"></div>' +
+        '<div><label for="g_to">終了日</label>' +
+          '<input type="date" id="g_to" value="' + addDays(state.date, 6) + '"></div>' +
+      '</div>' +
+      '<p class="hint">既にある枠と同じもの（日付・場所・開始・終了が一致）は作られません。' +
+        '同じ期間に何度実行しても増えません。</p>' +
+      '<div class="formActions"><div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">キャンセル</button>' +
+        '<button type="button" class="btn btn--primary" id="g_run">生成</button></div>');
+
+    $('g_run').addEventListener('click', function () {
+      if (state.busy) return;
+      setBusy(true);
+      call('generateSlots', state.token, $('g_name').value, $('g_from').value, $('g_to').value, state.operator)
+        .then(function (data) {
+          closeModal();
+          toast(data.created + '件の枠を作成しました' +
+            (data.skipped > 0 ? '（' + data.skipped + '件は既にありました）' : ''));
+          return loadDay(state.date);
+        })
+        .catch(function (e) {
+          showFormError(e.message);
+        })
+        .then(function () { setBusy(false); });
+    });
+  }
+
+  // ------------------------------------------------------------ コピー
+
+  function openCopyModal() {
+    openModal('枠をコピー',
+      '<p class="formError" hidden></p>' +
+      '<div class="field"><label>よく使う操作</label>' +
+        '<div class="field--row">' +
+          '<button type="button" class="btn" id="c_prevDay">前日からコピー</button>' +
+          '<button type="button" class="btn" id="c_prevWeek">前週からコピー</button>' +
+        '</div></div>' +
+      '<div class="field field--row">' +
+        '<div><label for="c_from">コピー元の開始日</label>' +
+          '<input type="date" id="c_from" value="' + addDays(state.date, -1) + '"></div>' +
+        '<div><label for="c_to">コピー先の開始日</label>' +
+          '<input type="date" id="c_to" value="' + state.date + '"></div>' +
+      '</div>' +
+      '<div class="field"><label for="c_days">コピーする日数</label>' +
+        '<select id="c_days"><option value="1">1日分</option><option value="7">7日分（1週間）</option></select></div>' +
+      '<p class="hint">枠だけをコピーします。割り当ては引き継ぎません。' +
+        '同じ枠が既にあれば作られません。</p>' +
+      '<div class="formActions"><div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">キャンセル</button>' +
+        '<button type="button" class="btn btn--primary" id="c_run">コピー</button></div>');
+
+    $('c_prevDay').addEventListener('click', function () {
+      $('c_from').value = addDays(state.date, -1);
+      $('c_to').value = state.date;
+      $('c_days').value = '1';
+    });
+    $('c_prevWeek').addEventListener('click', function () {
+      $('c_from').value = addDays(state.date, -7);
+      $('c_to').value = state.date;
+      $('c_days').value = '7';
+    });
+
+    $('c_run').addEventListener('click', function () {
+      if (state.busy) return;
+      setBusy(true);
+      call('copySlots', state.token, $('c_from').value, $('c_to').value, Number($('c_days').value), state.operator)
+        .then(function (data) {
+          closeModal();
+          toast(data.created + '件の枠をコピーしました' +
+            (data.skipped > 0 ? '（' + data.skipped + '件は既にありました）' : ''));
+          return loadDay(state.date);
+        })
+        .catch(function (e) {
+          showFormError(e.message);
+        })
+        .then(function () { setBusy(false); });
+    });
+  }
+
+  // ------------------------------------------------------------ 割り当て
+
+  /*
+    候補者の抽出（design.md 6.3）は、この節で**クライアント側に閉じている**。
+    getDayBoard が返したその日のデータだけで計算し、パネルを開くたびにサーバーへ
+    問い合わせない（CLAUDE.md 開発ルール）。ただし保存時はサーバー側が同じ検証をやり直す。
+  */
+
+  function assignmentsOfSlot(slotId) {
+    return state.assignments.filter(function (a) { return a.slot_id === slotId; });
+  }
+
+  function personOf(personId) {
+    return state.peopleById[personId] || null;
+  }
+
+  function personName(personId) {
+    const p = personOf(personId);
+    return p ? p.name : '(不明な人)';
+  }
+
+  function isStaff(personId) {
+    const p = personOf(personId);
+    return !!p && p.type === 'staff';
+  }
+
+  function slotOf(slotId) {
+    return state.slots.filter(function (s) { return s.id === slotId; })[0] || null;
+  }
+
+  function placeNameOf(placeId) {
+    const p = state.places.filter(function (x) { return x.id === placeId; })[0];
+    return p ? p.name : '(不明な場所)';
+  }
+
+  /** 半開区間 [aStart, aEnd) と [bStart, bEnd)。接するだけは重ならない（design.md 6.1） */
+  function overlapsRange(aStart, aEnd, bStart, bEnd) {
+    return aStart < bEnd && bStart < aEnd;
+  }
+
+  /** person_id → 可用時間帯（分）。職員の既定勤務時間帯はサーバーが補って返している */
+  function availabilityByPerson() {
+    const map = {};
+    state.availability.forEach(function (a) {
+      (map[a.person_id] = map[a.person_id] || [])
+        .push({ start: toMin(a.start_time), end: toMin(a.end_time) });
+    });
+    return map;
+  }
+
+  /** person_id → その日の割り当て合計分数。候補者の並べ替えに使う */
+  function loadByPerson() {
+    const map = {};
+    state.assignments.forEach(function (a) {
+      const s = slotOf(a.slot_id);
+      if (!s) return;
+      map[a.person_id] = (map[a.person_id] || 0) + (toMin(s.end_time) - toMin(s.start_time));
+    });
+    return map;
+  }
+
+  /**
+   * 枠に対する候補者を求める（design.md 6.3）。
+   *
+   * **人単位に集約してから判定する。** 1人が同じ日に複数の可用性行を持てるため、
+   * 行単位で判定すると同じ人が完全候補と部分候補の両方に出る。
+   */
+  function candidatesFor(slot) {
+    const start = toMin(slot.start_time);
+    const end = toMin(slot.end_time);
+    const avail = availabilityByPerson();
+    const load = loadByPerson();
+
+    const assignedHere = {};
+    assignmentsOfSlot(slot.id).forEach(function (a) { assignedHere[a.person_id] = true; });
+
+    // 同じ時間に別の場所へ入っている人は候補に出さない（ダブルブッキング防止）
+    const busy = {};
+    state.assignments.forEach(function (a) {
+      if (a.slot_id === slot.id) return;
+      const s = slotOf(a.slot_id);
+      if (!s) return;
+      if (overlapsRange(start, end, toMin(s.start_time), toMin(s.end_time))) busy[a.person_id] = true;
+    });
+
+    const full = [];
+    const partial = [];
+
+    state.people.forEach(function (p) {
+      if (p.merged_into) return;      // 名寄せ元は出さない（統合先が出る）
+      if (assignedHere[p.id]) return;
+      if (busy[p.id]) return;
+
+      const ranges = avail[p.id] || [];
+      const covering = ranges.some(function (r) { return r.start <= start && end <= r.end; });
+      const row = { person: p, load: load[p.id] || 0 };
+
+      if (covering) {
+        full.push(row);
+        return;
+      }
+      const touching = ranges.filter(function (r) { return overlapsRange(start, end, r.start, r.end); });
+      if (touching.length === 0) return;
+
+      // 枠のうち実際に入れる部分だけを示す
+      row.ranges = touching.map(function (r) {
+        return toHHMM(Math.max(r.start, start)) + '–' + toHHMM(Math.min(r.end, end));
+      }).join('、');
+      // 時間指定で入れるときの初期値（枠と可用性が重なっている部分）
+      row.preset_start = toHHMM(Math.max(touching[0].start, start));
+      row.preset_end = toHHMM(Math.min(touching[0].end, end));
+      partial.push(row);
+    });
+
+    full.sort(compareCandidates);
+    partial.sort(compareCandidates);
+    return { full: full, partial: partial };
+  }
+
+  /** ボランティアを先に、同種別では当日の割当が少ない順、次に かな／名前（design.md 6.3-5） */
+  function compareCandidates(a, b) {
+    const at = a.person.type === 'staff' ? 1 : 0;
+    const bt = b.person.type === 'staff' ? 1 : 0;
+    if (at !== bt) return at - bt;
+    if (a.load !== b.load) return a.load - b.load;
+    const ak = a.person.kana || a.person.name || '';
+    const bk = b.person.kana || b.person.name || '';
+    return String(ak).localeCompare(String(bk), 'ja');
+  }
+
+  function openAssignPanel(slotId) {
+    if (!slotOf(slotId)) return;
+    renderAssignPanel(slotId);
+  }
+
+  /** パネルは割り当て・解除のたびに組み直す。状態を持たせず、毎回 state から描く */
+  function renderAssignPanel(slotId) {
+    const slot = slotOf(slotId);
+    if (!slot) {
+      closeModal();
+      return;
+    }
+
+    const assigned = assignmentsOfSlot(slotId);
+    const staffCount = assigned.filter(function (a) { return isStaff(a.person_id); }).length;
+    const cand = candidatesFor(slot);
+
+    const shortage = slot.required_count - assigned.length;
+    const summary = '必要' + slot.required_count + '名 / 割当' + assigned.length + '名' +
+      (shortage > 0 ? '（あと' + shortage + '名）' : shortage < 0 ? '（超過' + (-shortage) + '名）' : '（充足）');
+    const staffLine = slot.staff_required > 0
+      ? '<p class="panelHead__staff">職員' + slot.staff_required + '名以上が必要（現在' + staffCount + '名）</p>'
+      : '';
+
+    // 割り当てのたびに組み直すため、そのままだと一覧の先頭へ戻ってしまう
+    const panelEl = document.querySelector('.modal__panel');
+    const keepScroll = ($('modal').hidden || !panelEl) ? 0 : panelEl.scrollTop;
+
+    openModal(placeNameOf(slot.place_id) + ' ' + slot.start_time + '–' + slot.end_time,
+      '<p class="panelHead">' + esc(summary) + '</p>' + staffLine +
+      assignedSectionHtml(assigned) +
+      candidateSectionHtml(cand.full) +
+      partialSectionHtml(cand.partial) +
+      // 枠の時間とは違う時間で入れたいとき。指定した時間の枠が新しくできる
+      '<button type="button" class="btn btn--block btn--sub" id="a_time">時間を指定して入れる</button>' +
+      '<div class="formActions"><div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">閉じる</button></div>');
+
+    if (panelEl && keepScroll) panelEl.scrollTop = keepScroll;
+
+    $('modalBody').querySelectorAll('[data-assign]').forEach(function (el) {
+      el.addEventListener('click', function () { doAssign(slotId, el.dataset.assign); });
+    });
+    $('modalBody').querySelectorAll('[data-unassign]').forEach(function (el) {
+      el.addEventListener('click', function () { doUnassign(slotId, el.dataset.unassign); });
+    });
+    // 部分可用の人は、枠全体ではなく「入れる時間だけ」の枠を作って入れる
+    $('modalBody').querySelectorAll('[data-pick]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        openTimePickPanel(slot.place_id, el.dataset.pick, {
+          start_time: el.dataset.start,
+          end_time: el.dataset.end
+        }, function () { renderAssignPanel(slotId); });
+      });
+    });
+    $('a_time').addEventListener('click', function () {
+      openNewAssignPanel(slot.place_id, {
+        start_time: slot.start_time,
+        end_time: slot.end_time
+      }, function () { renderAssignPanel(slotId); });
+    });
+  }
+
+  function assignedSectionHtml(assigned) {
+    if (assigned.length === 0) {
+      return '<section class="assignSec"><h3>割り当て済み (0)</h3>' +
+        '<p class="empty empty--sm">まだ誰も割り当てられていません。</p></section>';
+    }
+    const rows = assigned.map(function (a) {
+      // 送信中の行（楽観的更新で先に置いたもの）はまだ解除できない
+      const pending = a.id.indexOf('tmp:') === 0;
+      return '<li class="pRow pRow--assigned">' +
+        '<span class="pName">' + esc(personName(a.person_id)) + '</span>' +
+        '<span class="pTag' + (isStaff(a.person_id) ? ' pTag--staff' : '') + '">' +
+          (isStaff(a.person_id) ? '職員' : 'ボランティア') + '</span>' +
+        (pending
+          ? '<span class="pPending">登録中…</span>'
+          : '<button type="button" class="btn btn--small btn--danger" data-unassign="' + esc(a.id) + '">解除</button>') +
+      '</li>';
+    }).join('');
+    return '<section class="assignSec"><h3>割り当て済み (' + assigned.length + ')</h3>' +
+      '<ul class="pList">' + rows + '</ul></section>';
+  }
+
+  function candidateSectionHtml(rows) {
+    if (rows.length === 0) {
+      return '<section class="assignSec"><h3>割り当て可能 (0)</h3>' +
+        '<p class="empty empty--sm">この時間に入れる人がいません。' +
+        '可用性の登録状況を確認してください。</p></section>';
+    }
+    return '<section class="assignSec"><h3>割り当て可能 (' + rows.length + ')</h3>' +
+      volunteerStaffHtml(rows, candidateRowHtml) +
+    '</section>';
+  }
+
+  /** 候補者1行。押すと枠の時間そのままで割り当てる */
+  function candidateRowHtml(row) {
+    return pickRowHtml('data-assign="' + esc(row.person.id) + '"',
+      row.person.name, '本日 ' + loadLabel(row.load));
+  }
+
+  /** 部分可用の1行。押すと「入れる時間だけ」の枠を作る画面へ進む */
+  function partialRowHtml(row) {
+    return pickRowHtml(
+      'data-pick="' + esc(row.person.id) + '"' +
+      ' data-start="' + esc(row.preset_start) + '"' +
+      ' data-end="' + esc(row.preset_end) + '"',
+      row.person.name, row.ranges + ' のみ');
+  }
+
+  function pickRowHtml(attrs, name, note) {
+    return '<li><button type="button" class="pRow pRow--pick" ' + attrs + '>' +
+      '<span class="pName">' + esc(name) + '</span>' +
+      '<span class="pLoad">' + esc(note) + '</span>' +
+      '<span class="pAdd">＋</span>' +
+    '</button></li>';
+  }
+
+  function partialSectionHtml(rows) {
+    if (rows.length === 0) return '';
+    // 控えめに（design.md 4.2）。既定は閉じておき、必要なときだけ開く
+    return '<details class="assignSec assignSec--sub">' +
+      '<summary>一部の時間のみ可用 (' + rows.length + ')</summary>' +
+      '<p class="hint">枠の一部しか入れない人です。選ぶと、その人が入れる時間の枠を作ります。</p>' +
+      '<ul class="pList">' + rows.map(partialRowHtml).join('') + '</ul>' +
+    '</details>';
+  }
+
+  function loadLabel(minutes) {
+    if (!minutes) return '割当なし';
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return (h > 0 ? h + '時間' : '') + (m > 0 ? m + '分' : '');
+  }
+
+  /*
+    割り当て・解除は楽観的更新（design.md 4.2）。
+    先に画面を書き換え、サーバーが拒否したら元に戻す。管理者は実質1人ずつという前提に立つ。
+  */
+
+  function doAssign(slotId, personId) {
+    if (state.busy) return;
+    const tempId = 'tmp:' + Date.now();
+    state.assignments = state.assignments.concat([{
+      id: tempId, slot_id: slotId, person_id: personId, assigned_by: state.operator
+    }]);
+    refreshAssignView(slotId);
+
+    setBusy(true);
+    call('assign', state.token, slotId, personId, state.operator)
+      .then(function (data) {
+        // サーバー側で名寄せが解決されることがあるので、行ごと置き換える
+        state.assignments = state.assignments.map(function (a) {
+          return a.id === tempId ? data.assignment : a;
+        });
+        refreshAssignView(slotId);
+        if (data.notice) toast(data.notice);
+      })
+      .catch(function (e) {
+        state.assignments = state.assignments.filter(function (a) { return a.id !== tempId; });
+        refreshAssignView(slotId);
+        toast(e.message, true);
+      })
+      .then(function () { setBusy(false); });
+  }
+
+  function doUnassign(slotId, assignmentId) {
+    if (state.busy) return;
+    const removed = state.assignments.filter(function (a) { return a.id === assignmentId; })[0];
+    if (!removed) return;
+
+    state.assignments = state.assignments.filter(function (a) { return a.id !== assignmentId; });
+    refreshAssignView(slotId);
+
+    setBusy(true);
+    call('unassign', state.token, assignmentId, state.operator)
+      .catch(function (e) {
+        state.assignments = state.assignments.concat([removed]);
+        refreshAssignView(slotId);
+        toast(e.message, true);
+      })
+      .then(function () { setBusy(false); });
+  }
+
+  /** 配置表とパネルの両方を描き直す。片方だけ更新すると数字が食い違う */
+  function refreshAssignView(slotId) {
+    renderBoard();
+    renderAssignPanel(slotId);
+  }
+
+  // -------------------------------------------- 時間を指定して入れる（枠を作る）
+
+  /*
+    普段の運用はこちらが入口になる。**枠を先に作らなくてよい。**
+    場所の空いているところをタップ → 人を選ぶ → 時間を決める → 枠ができて人が入る。
+
+    順番は「人 → 時間」。先に人を選べば、その人が申告した時間帯をそのまま
+    初期値にできる（「来られる時間をそのまま入れる」運用に合う）。
+  */
+
+  /**
+   * 人を選ぶ画面。まだ枠が無いので、時間で候補者を絞り込まずにその日の全員を出す。
+   *
+   * @param {string} placeId
+   * @param {Object} preset 仮の時間帯（タップ位置、または元の枠の時間）
+   * @param {Function=} back 「戻る」で戻る先。省略時は閉じる
+   */
+  function openNewAssignPanel(placeId, preset, back) {
+    const rows = dayCandidates(preset);
+
+    openModal(placeNameOf(placeId) + ' に人を入れる',
+      '<p class="panelHead">入れる人を選んでください</p>' +
+      '<p class="hint">選んだあとに時間を決めます。枠はそのときに作られます。</p>' +
+      (rows.length === 0
+        ? '<p class="empty empty--sm">この日に入れる人がまだいません。' +
+          '応募フォームからの登録をお待ちください。</p>'
+        : '<section class="assignSec">' +
+            volunteerStaffHtml(rows, dayCandidateRowHtml) +
+          '</section>') +
+      '<div class="formActions">' +
+        (back ? '<button type="button" class="btn" id="n_back">戻る</button>' : '') +
+        '<div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">閉じる</button>' +
+      '</div>');
+
+    if (back) $('n_back').addEventListener('click', back);
+
+    $('modalBody').querySelectorAll('[data-pick]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        openTimePickPanel(placeId, el.dataset.pick, {
+          start_time: el.dataset.start,
+          end_time: el.dataset.end
+        }, function () { openNewAssignPanel(placeId, preset, back); });
+      });
+    });
+  }
+
+  /**
+   * その日に入れる人の一覧（時間は未定）。
+   *
+   * 時間が決まっていないのでダブルブッキングの除外はできない。
+   * 重なりは時間を決める画面で知らせ、最終的にはサーバー側が弾く。
+   */
+  function dayCandidates(preset) {
+    const avail = availabilityByPerson();
+    const load = loadByPerson();
+    const hintStart = preset && preset.start_time ? toMin(preset.start_time) : null;
+    const hintEnd = preset && preset.end_time ? toMin(preset.end_time) : null;
+
+    const rows = [];
+    state.people.forEach(function (p) {
+      if (p.merged_into) return;
+      const ranges = avail[p.id] || [];
+      if (ranges.length === 0) return;   // その日の申告が無い人は出さない
+
+      // タップした時間と重なる区間があればそれを、無ければ最初の区間を初期値にする
+      const hit = (hintStart === null) ? null : ranges.filter(function (r) {
+        return overlapsRange(hintStart, hintEnd, r.start, r.end);
+      })[0];
+      const base = hit || ranges[0];
+
+      rows.push({
+        person: p,
+        load: load[p.id] || 0,
+        preset_start: toHHMM(base.start),
+        preset_end: toHHMM(base.end),
+        ranges: ranges.map(function (r) { return toHHMM(r.start) + '–' + toHHMM(r.end); }).join('、')
+      });
+    });
+
+    return rows.sort(compareCandidates);
+  }
+
+  /** ボランティアと職員に分けて並べる。ボランティア優先が画面から分かるようにする */
+  function volunteerStaffHtml(rows, rowFn) {
+    const volunteers = rows.filter(function (r) { return r.person.type !== 'staff'; });
+    const staff = rows.filter(function (r) { return r.person.type === 'staff'; });
+    return (volunteers.length > 0
+        ? '<h4>ボランティア</h4><ul class="pList">' + volunteers.map(rowFn).join('') + '</ul>' : '') +
+      (staff.length > 0
+        ? '<h4>職員</h4><ul class="pList">' + staff.map(rowFn).join('') + '</ul>' : '');
+  }
+
+  function dayCandidateRowHtml(row) {
+    return pickRowHtml(
+      'data-pick="' + esc(row.person.id) + '"' +
+      ' data-start="' + esc(row.preset_start) + '"' +
+      ' data-end="' + esc(row.preset_end) + '"',
+      row.person.name, row.ranges);
+  }
+
+  /**
+   * 時間を決める画面。ここで登録すると、その時間の枠ができて人が入る。
+   *
+   * 初期値は選んだ人の申告時間帯。必要人数の既定は1名（＝その人で充足）で、
+   * 「ここは3名ほしい」と分かっているときだけ増やす。
+   */
+  function openTimePickPanel(placeId, personId, preset, back) {
+    const person = personOf(personId);
+    if (!person) return;
+
+    const cfg = state.config;
+    const start = preset.start_time || cfg.day_start;
+    const end = preset.end_time || cfg.day_end;
+
+    openModal(placeNameOf(placeId) + ' / ' + person.name,
+      '<p class="formError" hidden></p>' +
+      '<p class="panelHead">' + esc(person.name) + 'さんを入れる時間</p>' +
+      '<p class="hint">' + esc(availabilityLabel(personId)) + '</p>' +
+      '<div class="field field--row">' +
+        '<div><label for="n_start">開始</label>' +
+          '<select id="n_start">' + timeOptions(start) + '</select></div>' +
+        '<div><label for="n_end">終了</label>' +
+          '<select id="n_end">' + timeOptions(end) + '</select></div>' +
+      '</div>' +
+      '<div class="field"><label for="n_required">この枠の必要人数</label>' +
+        '<input type="number" id="n_required" min="1" step="1" value="1">' +
+        '<p class="hint">同じ時間に他にも人がほしいときは増やしてください。' +
+          'あとから枠を編集して変えることもできます。</p></div>' +
+      '<p class="warnLine" id="n_warn" hidden></p>' +
+      '<div class="formActions">' +
+        (back ? '<button type="button" class="btn" id="n_back">戻る</button>' : '') +
+        '<div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">キャンセル</button>' +
+        '<button type="button" class="btn btn--primary" id="n_save">この内容で登録</button>' +
+      '</div>');
+
+    if (back) $('n_back').addEventListener('click', back);
+
+    const updateWarn = function () {
+      const w = timeWarning(personId, $('n_start').value, $('n_end').value);
+      $('n_warn').textContent = w;
+      $('n_warn').hidden = !w;
+    };
+    $('n_start').addEventListener('change', updateWarn);
+    $('n_end').addEventListener('change', updateWarn);
+    updateWarn();
+
+    $('n_save').addEventListener('click', function () {
+      if (state.busy) return;
+      const payload = {
+        date: state.date,
+        place_id: placeId,
+        start_time: $('n_start').value,
+        end_time: $('n_end').value,
+        required_count: $('n_required').value,
+        person_id: personId
+      };
+      if (toMin(payload.start_time) >= toMin(payload.end_time)) {
+        showFormError('終了時刻は開始時刻より後にしてください。');
+        return;
+      }
+      submitNewAssign(payload);
+    });
+  }
+
+  /** その人が申告している時間帯の説明 */
+  function availabilityLabel(personId) {
+    const ranges = availabilityByPerson()[personId] || [];
+    if (ranges.length === 0) return 'この日の申告はありません。';
+    return '申告: ' + ranges.map(function (r) {
+      return toHHMM(r.start) + '–' + toHHMM(r.end);
+    }).join('、');
+  }
+
+  /**
+   * 選んだ時間についての注意書き。**登録は止めない。**
+   * ダブルブッキングだけはサーバー側が弾くので、ここでは先に気づけるようにする。
+   */
+  function timeWarning(personId, startStr, endStr) {
+    const start = toMin(startStr);
+    const end = toMin(endStr);
+    if (start >= end) return '';
+
+    const conflict = state.assignments.filter(function (a) {
+      if (a.person_id !== personId) return false;
+      const s = slotOf(a.slot_id);
+      return s && overlapsRange(start, end, toMin(s.start_time), toMin(s.end_time));
+    })[0];
+    if (conflict) {
+      const s = slotOf(conflict.slot_id);
+      return '同じ時間に「' + placeNameOf(s.place_id) + ' ' + s.start_time + '–' + s.end_time +
+        '」へ割り当て済みです。このままでは登録できません。';
+    }
+
+    const ranges = availabilityByPerson()[personId] || [];
+    const covered = ranges.some(function (r) { return r.start <= start && end <= r.end; });
+    if (!covered) return '申告された時間の外です。登録はできますが、確認してください。';
+    return '';
+  }
+
+  /**
+   * 枠の作成と割り当てをまとめて送る。
+   *
+   * ここは**楽観的更新をしない。** 枠のIDがサーバーで決まるため、
+   * 先に画面へ置いても差し替えが必要になり、失敗時の巻き戻しも複雑になる。
+   */
+  function submitNewAssign(payload) {
+    setBusy(true);
+    call('assignToNewSlot', state.token, payload, state.operator)
+      .then(function (data) {
+        // 既にある枠が使い回されることもあるので、id で置き換えてから足す
+        state.slots = state.slots.filter(function (s) { return s.id !== data.slot.id; })
+          .concat([data.slot]);
+        state.assignments = state.assignments.concat([data.assignment]);
+        renderBoard();
+        // 続けて同じ枠へ人を足せるよう、その枠の割り当てパネルへ移る
+        renderAssignPanel(data.slot.id);
+        // トーストは1つしか出せない。知らせがあるときは同じ吹き出しにまとめる
+        toast((data.slotCreated ? '枠を作って割り当てました' : '割り当てました') +
+          (data.notice ? '\n' + data.notice : ''));
+      })
+      .catch(function (e) {
+        showFormError(e.message);
+      })
+      .then(function () { setBusy(false); });
+  }
+
+  // ------------------------------------------------------------ 管理モード
+
+  /**
+   * 管理モードに入る。合言葉は無く、聞くのは「操作する人の名前」だけ。
+   *
+   * これは認証ではない。変更した人を `_log` に残すための記名であり、
+   * 画面上の切り替えにすぎない（サーバー側も閲覧トークンしか見ない）。
+   */
+  function openOperatorModal() {
+    const operatorField = state.operators.length > 0
+      ? '<select id="l_operator"><option value="">選んでください</option>' +
+          state.operators.map(function (o) {
+            return '<option value="' + esc(o) + '"' + (o === state.operator ? ' selected' : '') + '>' +
+              esc(o) + '</option>';
+          }).join('') + '</select>'
+      : '<input type="text" id="l_operator" value="' + esc(state.operator) + '" placeholder="お名前" maxlength="50">';
+
+    openModal('管理モード',
+      '<p class="formError" hidden></p>' +
+      '<div class="field"><label for="l_operator">操作する人</label>' + operatorField +
+        '<p class="hint">誰が変更したかを記録に残します。変更履歴は _log シートで確認できます。</p></div>' +
+      '<div class="formActions"><div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">キャンセル</button>' +
+        '<button type="button" class="btn btn--primary" id="l_run">開始</button></div>');
+
+    const field = $('l_operator');
+    field.focus();
+    field.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') $('l_run').click();
+    });
+
+    $('l_run').addEventListener('click', function () {
+      const operator = field.value.trim();
+      if (!operator) {
+        showFormError('操作する人を選んでください。');
+        return;
+      }
+      state.operator = operator;
+      state.adminMode = true;
+      // 管理モードの主な作業は割り当て。枠の編集は必要なときだけ切り替える
+      state.editMode = false;
+      store.set('shift.operator', operator);
+      closeModal();
+      render();
+      toast(operator + 'さんとして管理モードになりました');
+    });
+  }
+
+  /** 管理モードを抜ける。記名を消すだけで、サーバー側に状態は無い */
+  function endAdminMode() {
+    state.adminMode = false;
+    state.editMode = false;
+    store.remove('shift.operator');
+    render();
+    toast('管理モードを終了しました');
+  }
+
+  // ------------------------------------------------------------ イベント
+
+  $('prevDay').addEventListener('click', function () { loadDay(addDays(state.date, -1)); });
+  $('nextDay').addEventListener('click', function () { loadDay(addDays(state.date, 1)); });
+  $('todayBtn').addEventListener('click', function () { loadDay(todayStr()); });
+
+  $('datePicker').addEventListener('change', function (e) {
+    if (e.target.value) loadDay(e.target.value);
+    else e.target.value = state.date;
+  });
+
+  // 管理モード中に押した場合は操作者の交代になる
+  $('adminBtn').addEventListener('click', openOperatorModal);
+
+  $('editModeToggle').addEventListener('change', function (e) {
+    state.editMode = e.target.checked;
+    render();
+  });
+
+  $('placesBtn').addEventListener('click', openPlacesModal);
+  $('generateBtn').addEventListener('click', openGenerateModal);
+  $('copyBtn').addEventListener('click', openCopyModal);
+  $('logoutBtn').addEventListener('click', endAdminMode);
+
+  boot();
+})();
+</script>

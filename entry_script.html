@@ -1,0 +1,276 @@
+<script>
+/*
+  entry_script.html … 応募フォームのロジック
+
+  ここは「登録できずに諦められること」が最大の失敗。
+  迷う操作を作らず、エラーは何をすればよいかまで書く。
+*/
+
+(function () {
+  'use strict';
+
+  const call = App.call;
+  const esc = App.esc;
+  const toMin = App.toMin;
+  const toHHMM = App.toHHMM;
+  const toast = App.toast;
+
+  const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+  const $ = function (id) { return document.getElementById(id); };
+
+  const state = {
+    token: BOOT.token,
+    proxy: BOOT.proxy === true,
+    config: null,
+    operators: [],
+    busy: false
+  };
+
+  // ------------------------------------------------------------ 起動
+
+  function boot() {
+    $('f_date').value = BOOT.date || App.todayStr();
+
+    call('getBootstrap', state.token).then(function (data) {
+      state.config = data.config;
+      state.operators = data.operators || [];
+      setupProxyFields();
+      addRangeRow();
+      $('loading').hidden = true;
+      $('entryForm').hidden = false;
+    }).catch(function (e) {
+      $('loading').textContent = e.message;
+    });
+  }
+
+  /** 代理入力モードのときだけ、種別と入力者の欄を出す */
+  function setupProxyFields() {
+    if (!state.proxy) return;
+    $('pageTitle').textContent = '代理で登録する';
+    $('typeField').hidden = false;
+    $('operatorField').hidden = false;
+    $('operatorInput').innerHTML = state.operators.length > 0
+      ? '<select id="f_operator"><option value="">選んでください</option>' +
+          state.operators.map(function (o) {
+            return '<option value="' + esc(o) + '">' + esc(o) + '</option>';
+          }).join('') + '</select>'
+      : '<input type="text" id="f_operator" maxlength="50" placeholder="入力した人のお名前">';
+  }
+
+  // ------------------------------------------------------------ 時間帯の行
+
+  function timeOptions(selected) {
+    const cfg = state.config;
+    return App.timeOptions(toMin(cfg.day_start), toMin(cfg.day_end),
+      cfg.slot_unit_minutes || 10, selected);
+  }
+
+  /**
+   * 時間帯の行を1つ足す。
+   * 既定値は「前の行の終了時刻から」。連続で入力するときに選び直す手間を減らす。
+   */
+  function addRangeRow(start, end) {
+    const cfg = state.config;
+    const dayStart = toMin(cfg.day_start);
+    const dayEnd = toMin(cfg.day_end);
+    const rows = $('rangeList').children;
+
+    if (!start) {
+      const last = rows.length > 0 ? rows[rows.length - 1] : null;
+      const from = last ? toMin(last.querySelector('.rangeEnd').value) : dayStart;
+      start = toHHMM(Math.min(from, dayEnd - 60 > dayStart ? dayEnd - 60 : dayStart));
+      end = toHHMM(Math.min(toMin(start) + 180, dayEnd));
+    }
+
+    const row = document.createElement('div');
+    row.className = 'rangeRow';
+    row.innerHTML =
+      '<select class="rangeStart" aria-label="開始時刻">' + timeOptions(start) + '</select>' +
+      '<span class="rangeRow__sep">〜</span>' +
+      '<select class="rangeEnd" aria-label="終了時刻">' + timeOptions(end) + '</select>' +
+      '<button type="button" class="btn btn--icon rangeRow__del" aria-label="この時間帯を削除">×</button>';
+
+    row.querySelector('.rangeRow__del').addEventListener('click', function () {
+      row.remove();
+      if ($('rangeList').children.length === 0) addRangeRow();
+      updateDeleteButtons();
+    });
+
+    // 開始を後ろにずらしたら、終了もついてくる（終了 <= 開始 を作らせない）
+    row.querySelector('.rangeStart').addEventListener('change', function (e) {
+      const endSel = row.querySelector('.rangeEnd');
+      if (toMin(endSel.value) <= toMin(e.target.value)) {
+        const next = Math.min(toMin(e.target.value) + 60, dayEnd);
+        endSel.value = toHHMM(next);
+      }
+    });
+
+    $('rangeList').appendChild(row);
+    updateDeleteButtons();
+  }
+
+  /** 行が1つだけのときは削除ボタンを隠す（消せない行を押させない） */
+  function updateDeleteButtons() {
+    const rows = $('rangeList').children;
+    Array.prototype.forEach.call(rows, function (row) {
+      row.querySelector('.rangeRow__del').hidden = rows.length <= 1;
+    });
+  }
+
+  function readRanges() {
+    return Array.prototype.map.call($('rangeList').children, function (row) {
+      return {
+        start: row.querySelector('.rangeStart').value,
+        end: row.querySelector('.rangeEnd').value
+      };
+    });
+  }
+
+  // ------------------------------------------------------------ 送信
+
+  function showError(message) {
+    const box = document.querySelector('.formError');
+    box.textContent = message;
+    box.hidden = false;
+    box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function clearError() {
+    document.querySelector('.formError').hidden = true;
+  }
+
+  function submit() {
+    if (state.busy) return;
+    clearError();
+
+    const payload = {
+      name: $('f_name').value,
+      contact: $('f_contact').value,
+      type: state.proxy ? $('f_type').value : 'volunteer',
+      date: $('f_date').value,
+      ranges: readRanges(),
+      operator: state.proxy && $('f_operator') ? $('f_operator').value : ''
+    };
+
+    // 送信前の確認は入力補助。判定はサーバー側が本体
+    if (!payload.name.trim()) {
+      showError('お名前を入力してください。');
+      $('f_name').focus();
+      return;
+    }
+    if (!payload.date) {
+      showError('日付を選んでください。');
+      $('f_date').focus();
+      return;
+    }
+    const bad = payload.ranges.filter(function (r) { return toMin(r.end) <= toMin(r.start); });
+    if (bad.length > 0) {
+      showError('終了時刻は開始時刻より後にしてください。');
+      return;
+    }
+
+    setBusy(true);
+    call('submitAvailability', state.token, payload)
+      .then(function (data) {
+        showReceipt(data, payload);
+      })
+      .catch(function (e) {
+        showError(e.message);
+        toast('登録できませんでした', true);
+      })
+      .then(function () { setBusy(false); });
+  }
+
+  function setBusy(on) {
+    state.busy = on;
+    $('submitBtn').disabled = on;
+    $('submitBtn').textContent = on ? '登録しています…' : 'この内容で登録する';
+  }
+
+  // ------------------------------------------------------------ 控え
+
+  /**
+   * 送信後の控え。**入力内容をそのまま見せる**（design.md 4.3）。
+   * 「送れたのか分からない」が最も多い問い合わせになるため、
+   * 何がいつ登録されたのかを画面で確認できるようにする。
+   */
+  function showReceipt(data, payload) {
+    const dow = DOW[App.dowOf(data.date)];
+    const list = data.entries.map(function (e) {
+      return '<li>' + esc(e.start_time) + ' 〜 ' + esc(e.end_time) + '</li>';
+    }).join('');
+
+    $('receipt').innerHTML =
+      '<div class="receipt">' +
+        '<p class="receipt__badge">登録できました</p>' +
+        '<dl class="receipt__list">' +
+          '<dt>お名前</dt><dd>' + esc(data.name) +
+            (data.type === 'staff' ? '（職員）' : '') + '</dd>' +
+          '<dt>日付</dt><dd>' + esc(data.date) + '（' + dow + '）</dd>' +
+          '<dt>入れる時間帯</dt><dd><ul class="receipt__times">' + list + '</ul></dd>' +
+        '</dl>' +
+        (data.entries.length < payload.ranges.length
+          ? '<p class="hint">重なっていた時間帯はひとつにまとめました。</p>'
+          : '') +
+        (data.addedCount === 0
+          ? '<p class="hint">この内容は登録済みでした。二重にはなっていません。</p>'
+          : '') +
+        '<p class="hint">この画面は控えです。閉じてしまっても登録は残ります。' +
+          '変更したいときは、もう一度この画面から登録してください。</p>' +
+        '<div class="receipt__actions">' +
+          '<button type="button" class="btn" id="againSameDay">同じ日にもう1つ追加</button>' +
+          '<button type="button" class="btn" id="againNextDay">別の日を登録</button>' +
+          (state.proxy ? '<button type="button" class="btn" id="againOther">別の人を入力</button>' : '') +
+        '</div>' +
+      '</div>';
+
+    $('entryForm').hidden = true;
+    $('receipt').hidden = false;
+    window.scrollTo(0, 0);
+
+    $('againSameDay').addEventListener('click', function () { backToForm({ keepPerson: true }); });
+    $('againNextDay').addEventListener('click', function () {
+      backToForm({ keepPerson: true, date: App.addDays(data.date, 1) });
+    });
+    if (state.proxy) {
+      $('againOther').addEventListener('click', function () { backToForm({ keepPerson: false }); });
+    }
+  }
+
+  /** 控えから入力画面へ戻す */
+  function backToForm(opts) {
+    if (!opts.keepPerson) {
+      $('f_name').value = '';
+      $('f_contact').value = '';
+      if (state.proxy) $('f_type').value = 'volunteer';
+    }
+    if (opts.date) $('f_date').value = opts.date;
+
+    $('rangeList').innerHTML = '';
+    addRangeRow();
+    clearError();
+
+    $('receipt').hidden = true;
+    $('entryForm').hidden = false;
+    window.scrollTo(0, 0);
+    if (!opts.keepPerson) $('f_name').focus();
+  }
+
+  // ------------------------------------------------------------ イベント
+
+  $('entryForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    submit();
+  });
+
+  $('addRange').addEventListener('click', function () { addRangeRow(); });
+
+  $('allDay').addEventListener('click', function () {
+    $('rangeList').innerHTML = '';
+    addRangeRow(state.config.day_start, state.config.day_end);
+    toast('終日（' + state.config.day_start + '〜' + state.config.day_end + '）を入力しました');
+  });
+
+  boot();
+})();
+</script>

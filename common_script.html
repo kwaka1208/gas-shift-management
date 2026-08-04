@@ -1,0 +1,102 @@
+<script>
+/*
+  common_script.html … 配置表（board）と応募フォーム（entry）の両方で使う処理
+
+  ここに置くのは「どの画面でも同じもの」だけ。画面固有のロジックは持ち込まない。
+  依存するDOMは #toast のみ（両画面が持っている）。
+*/
+const App = (function () {
+  'use strict';
+
+  /**
+   * google.script.run を Promise にする。
+   * 戻り値は { ok, data } / { ok, error } に統一されている前提。
+   * 成功・失敗の両ハンドラを必ず付ける（gas.md 6）。
+   */
+  function call(name) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      const runner = google.script.run
+        .withSuccessHandler(function (res) {
+          if (res && res.ok) resolve(res.data);
+          else reject(new Error((res && res.error) || '処理できませんでした。'));
+        })
+        .withFailureHandler(function (err) {
+          reject(new Error((err && err.message) || '通信に失敗しました。電波の状態を確認してください。'));
+        });
+      runner[name].apply(runner, args);
+    });
+  }
+
+  /** HTML エスケープ。テンプレートリテラルに値を差し込む前に必ず通す */
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function toMin(hhmm) {
+    const p = String(hhmm).split(':');
+    return Number(p[0]) * 60 + Number(p[1]);
+  }
+
+  function toHHMM(min) {
+    const m = Math.max(0, Math.round(min));
+    return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  }
+
+  /** 日付計算は UTC で行う。端末のタイムゾーンでずらさない */
+  function addDays(dateStr, n) {
+    const p = dateStr.split('-').map(Number);
+    const dt = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    dt.setUTCDate(dt.getUTCDate() + n);
+    return dt.toISOString().slice(0, 10);
+  }
+
+  function dowOf(dateStr) {
+    const p = dateStr.split('-').map(Number);
+    return new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay();
+  }
+
+  /** 端末のカレンダー上の今日 */
+  function todayStr() {
+    const d = new Date();
+    return [d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0')].join('-');
+  }
+
+  /** 刻み幅の時刻の選択肢を組み立てる。selected が範囲外でも値を失わない */
+  function timeOptions(fromMin, toMin_, unit, selected) {
+    const values = [];
+    for (let m = fromMin; m <= toMin_; m += unit) values.push(toHHMM(m));
+    if (selected && values.indexOf(selected) === -1) values.push(selected);
+    return values.map(function (v) {
+      return '<option value="' + v + '"' + (v === selected ? ' selected' : '') + '>' + v + '</option>';
+    }).join('');
+  }
+
+  let toastTimer = null;
+  function toast(message, isError) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = message;
+    el.className = 'toast' + (isError ? ' toast--error' : '');
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.hidden = true; }, isError ? 6000 : 2600);
+  }
+
+  return {
+    call: call,
+    esc: esc,
+    toMin: toMin,
+    toHHMM: toHHMM,
+    addDays: addDays,
+    dowOf: dowOf,
+    todayStr: todayStr,
+    timeOptions: timeOptions,
+    toast: toast
+  };
+})();
+</script>
