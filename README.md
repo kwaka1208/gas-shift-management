@@ -400,7 +400,7 @@ URLに `?t=…` が付いていないか、トークンが古くなっていま�
 2. `docs/requirements.md` … 何を作るか
 3. `docs/design.md` … どう作るか（**特に「6. 重要ロジック」**）
 4. `docs/roadmap.md` … どの順で作るか
-5. `CLAUDE.md` … 変更してはいけない設計判断
+5. `.claude/CLAUDE.md` … 変更してはいけない設計判断
 
 ### ファイル構成
 

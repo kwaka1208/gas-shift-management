@@ -1,0 +1,4 @@
+.DS_Store
+
+# Claude Code のローカル権限設定（個人環境ごとに異なるため共有しない）
+.claude/settings.local.json
