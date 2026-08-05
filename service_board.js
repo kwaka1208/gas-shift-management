@@ -113,39 +113,94 @@ function buildDayBoard_(date, admin) {
   };
 }
 
+/*
+  【日をまたぐ行の繰り越し】
+
+  `22:00`〜`26:00` は **8/10 の1行**として持つ（`date` は開始日のまま動かさない。design.md 5.1）。
+  そのままだと 8/11 の画面には何も出ず、「翌朝2時まで人がいる」ことが分からない。
+
+  そこで **前日の行のうち24時を越える分を、その日のタイムラインへ写して返す。**
+  写した行は時刻を24時間ぶん戻し（`26:00` → `02:00`）、`carried_from` に元の日付を入れる。
+
+  **シートには何も書かない。** 画面の上だけで前日の続きを見せる。
+  割り当てだけでなく**可用性も同じように写すこと。** 片方だけ写すと、
+  申告の中に入っているはずの割り当てが「申告外」と誤警告される。
+*/
+
+/** 24時を越えて翌日へ続く行か */
+function extendsToNextDay_(row) {
+  return isValidTimeStr_(row.end_time) && toMinutes_(row.end_time) > DAY_MINUTES_;
+}
+
+/** 前日の行を、その日のタイムライン上の時刻に写す（24時間ぶん戻す） */
+function shiftToNextDay_(row) {
+  const start = Math.max(0, toMinutes_(row.start_time) - DAY_MINUTES_);
+  const end = toMinutes_(row.end_time) - DAY_MINUTES_;
+  return { start_time: toHHMM_(start), end_time: toHHMM_(end) };
+}
+
 /**
  * 指定日の割り当て。場所の表示順 → 開始時刻の順に並べる。
  *
  * **1行が「誰がどこにいつ入るか」を丸ごと持つ**（design.md 3 assignments）。
- * かつてここは枠と割り当ての2回読みだったが、統合して1回になった。
+ * 前日から続いている分も含める（上の「日をまたぐ行の繰り越し」）。
  */
 function readAssignmentsByDate_(date) {
-  const rows = readTable_(SHEET_DEFS.ASSIGNMENTS, function (r) { return r.date === date; });
-  const order = placeOrderMap_();
+  const own = readTable_(SHEET_DEFS.ASSIGNMENTS, function (r) { return r.date === date; })
+    .map(publicAssignment_);
 
-  rows.sort(function (a, b) {
+  const prev = addDays_(date, -1);
+  const carried = readTable_(SHEET_DEFS.ASSIGNMENTS, function (r) {
+    return r.date === prev && extendsToNextDay_(r);
+  }).map(function (r) {
+    const out = publicAssignment_(r);
+    const shifted = shiftToNextDay_(r);
+    // 元の値も残す。画面が「前日の 22:00–26:00 の続き」と説明できるようにするため
+    out.origin_start_time = out.start_time;
+    out.origin_end_time = out.end_time;
+    out.start_time = shifted.start_time;
+    out.end_time = shifted.end_time;
+    out.carried_from = r.date;
+    return out;
+  });
+
+  const order = placeOrderMap_();
+  return own.concat(carried).sort(function (a, b) {
     const ao = order[a.place_id] === undefined ? Number.MAX_SAFE_INTEGER : order[a.place_id];
     const bo = order[b.place_id] === undefined ? Number.MAX_SAFE_INTEGER : order[b.place_id];
     if (ao !== bo) return ao - bo;
     if (a.start_time !== b.start_time) return a.start_time < b.start_time ? -1 : 1;
     return a.end_time < b.end_time ? -1 : 1;
   });
-
-  return rows.map(publicAssignment_);
 }
 
-/** 指定日の可用性 */
+/** 指定日の可用性。割り当てと同じく、前日から続いている分も含める */
 function readAvailabilityByDate_(date) {
-  return readTable_(SHEET_DEFS.AVAILABILITY, function (r) { return r.date === date; })
-    .map(function (a) {
-      return {
-        id: a.id,
-        person_id: a.person_id,
-        date: a.date,
-        start_time: a.start_time,
-        end_time: a.end_time
-      };
-    });
+  const toPublic = function (a, extra) {
+    const out = {
+      id: a.id,
+      person_id: a.person_id,
+      date: a.date,
+      start_time: a.start_time,
+      end_time: a.end_time
+    };
+    if (extra) {
+      out.start_time = extra.start_time;
+      out.end_time = extra.end_time;
+      out.carried_from = a.date;
+    }
+    return out;
+  };
+
+  const own = readTable_(SHEET_DEFS.AVAILABILITY, function (r) { return r.date === date; })
+    .map(function (a) { return toPublic(a, null); });
+
+  const prev = addDays_(date, -1);
+  const carried = readTable_(SHEET_DEFS.AVAILABILITY, function (r) {
+    return r.date === prev && extendsToNextDay_(r);
+  }).map(function (a) { return toPublic(a, shiftToNextDay_(a)); });
+
+  return own.concat(carried);
 }
 
 /** place_id → 表示順（並べ替え用） */

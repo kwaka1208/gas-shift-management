@@ -222,6 +222,13 @@
           openAssignmentPanel(el.dataset.id);
         });
       });
+      // 前日から続いている帯は、直さずに前日へ移動させる
+      $('board').querySelectorAll('.slot--carried').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openCarriedModal(el.dataset.id, el.dataset.carried);
+        });
+      });
     }
   }
 
@@ -327,7 +334,7 @@
       const row = byPerson[personId];
       row.person = personOf(personId) ||
         { id: personId, name: '(不明な人)', type: 'volunteer', kana: '' };
-      row.freeMin = totalMinutes(row.free);
+      // 並べ替え（割り当ての少ない人を上に）と「空き」の判定にだけ使う。画面には出さない
       row.busyMin = totalMinutes(row.busy);
       // 申告の外に割り当てられている人（design.md 6.5 no_availability の予告）
       row.outside = row.busy.filter(function (b) { return !coveredByAny(row.free, b); }).length;
@@ -339,7 +346,13 @@
 
   function byStart(a, b) { return a.start - b.start || a.end - b.end; }
 
-  /** 重なりを取り除いた合計分数。二重に数えないための畳み込み */
+  /**
+   * 重なりを取り除いた合計分数。二重に数えないための畳み込み。
+   *
+   * **画面には出さない。** 並べ替え（割り当ての少ない人を上に）と
+   * 「空き」の判定にだけ使う。1人が同じ日に複数行を持てるため、
+   * 単純に足すと重なった分を二重に数えてしまう。
+   */
   function totalMinutes(ranges) {
     const sorted = ranges.slice().sort(byStart);
     let total = 0;
@@ -413,20 +426,22 @@
           openUnassignModal(el.dataset.unassign, el.dataset.who, el.dataset.what);
         });
       });
+      $('people').querySelectorAll('[data-carried-id]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          openCarriedModal(el.dataset.carriedId, el.dataset.carried);
+        });
+      });
     }
   }
 
   /** その日ぜんたいの状況。個々の行を見る前に、足りているのかを掴めるようにする */
   function peopleSummaryHtml(rows) {
-    const freeMin = rows.reduce(function (sum, r) { return sum + r.freeMin; }, 0);
-    const busyMin = rows.reduce(function (sum, r) { return sum + r.busyMin; }, 0);
     const idle = rows.filter(function (r) { return r.busyMin === 0; }).length;
 
     return '<div class="resSummary">' +
       '<span><b>' + rows.length + '</b>人が登録</span>' +
       '<span>まだ割り当て無し <b>' + idle + '</b>人</span>' +
       '<span>割り当て <b>' + state.assignments.length + '</b>件</span>' +
-      '<span>時間 <b>' + loadLabel(busyMin) + '</b> / ' + loadLabel(freeMin) + '</span>' +
     '</div>';
   }
 
@@ -451,22 +466,33 @@
       if (!box) return '';
       const outside = !coveredByAny(row.free, b);
       const label = b.place + ' ' + b.time;
+      // 場所ごとの帯と同じ詳細を出す（元の割り当てを引ければ）
+      const src = assignmentOf(b.assignmentId);
+      const carried = !!(src && src.carried_from);
+      const tip = src
+        ? assignmentTooltip(src) + (outside ? '\n⚠ 申告された時間の外です' : '')
+        : label;
       const tag = state.adminMode ? 'button' : 'span';
       return '<' + tag + (state.adminMode ? ' type="button"' : '') +
         ' class="res__busy' + (outside ? ' res__busy--warn' : '') +
           (state.adminMode ? ' res__busy--tappable' : '') + '"' +
         ' style="left:' + box.left + '%;width:' + box.width + '%"' +
-        ' title="' + esc(label) + '"' +
-        (state.adminMode
+        ' title="' + esc(tip) + '"' +
+        (state.adminMode && !carried
           ? ' data-unassign="' + esc(b.assignmentId) + '"' +
             ' data-who="' + esc(person.name) + '" data-what="' + esc(label) + '"'
+          : '') +
+        // 前日から続く帯は解除させず、元の日へ誘導する（場所ごとの帯と同じ扱い）
+        (state.adminMode && carried
+          ? ' data-carried-id="' + esc(b.assignmentId) + '"' +
+            ' data-carried="' + esc(src.carried_from) + '"'
           : '') +
         '><span class="res__busyLabel">' + esc(b.place) + '</span></' + tag + '>';
     }).join('');
 
-    const note = row.busyMin === 0
-      ? '<small class="res__idle">空き</small>'
-      : '<small>' + loadLabel(row.busyMin) + ' / ' + loadLabel(row.freeMin) + '</small>';
+    // まだ誰にも割り当てていない人だけ印を出す。**割当済みの人には何も足さない**
+    // （時間の合計は出さない。帯を見れば埋まり具合は分かる）
+    const note = row.busyMin === 0 ? '<small class="res__idle">空き</small>' : '';
 
     const meta = personMeta(person);
 
@@ -577,6 +603,44 @@
     return { items: items, count: laneEnds.length };
   }
 
+  /**
+   * ホバーで出す詳細（`title` 属性）。
+   *
+   * 帯は狭いと `…` で切れるうえ、性別・年齢は短縮形（`女42`）にしている。
+   * **切れて読めなかったものを、そのまま読める形で補うのがここの役目。**
+   * タップできない閲覧URLでも中身を確かめられる。
+   *
+   * `title` は改行を扱えるので、1項目1行で並べる。
+   * スマホにはホバーが無いため、**ここにしか無い情報を置いてはいけない。**
+   */
+  function assignmentTooltip(row) {
+    const person = personOf(row.person_id);
+    const lines = [
+      placeNameOf(row.place_id) + ' ' + tl(row.start_time) + '–' + tl(row.end_time),
+      personName(row.person_id) + (isStaff(row.person_id) ? '（職員）' : '（ボランティア）')
+    ];
+
+    // 前日から続いている分は、元の日付と時刻を必ず出す。
+    // この画面の時刻（02:00）とシートの値（26:00）が違うため、これが無いと探せない
+    if (row.carried_from) {
+      lines.push('前日 ' + row.carried_from + ' の割り当て（' +
+        tl(row.origin_start_time) + '–' + tl(row.origin_end_time) + '）の続き');
+    }
+
+    const meta = person ? personMeta(person) : '';
+    if (meta) lines.push(meta);
+
+    // その人がその日に申告した時間帯。申告外に入れていないかを確かめられる
+    const ranges = availabilityByPerson()[row.person_id] || [];
+    lines.push(ranges.length === 0
+      ? '申告なし'
+      : '申告: ' + ranges.map(function (r) { return ml(r.start) + '–' + ml(r.end); }).join('、'));
+
+    if (row.note) lines.push('メモ: ' + row.note);
+
+    return lines.join('\n');
+  }
+
   /** 割り当て1件のブロック。**枠は無い。この帯そのものが1件の割り当て** */
   function renderAssignmentBlock(row, lane, dayStart, total) {
     const dayEnd = dayStart + total;
@@ -586,9 +650,15 @@
     const width = (end - start) / total * 100;
     const top = 'calc(.25rem + ' + lane + ' * (var(--block-h) + .25rem))';
 
-    // 管理URLではタップすると編集パネルが開く
-    const editable = state.adminMode;
-    const tag = editable ? 'button' : 'div';
+    /*
+      前日から続いている帯は**この画面では編集させない。**
+      画面の時刻（02:00）と保存値（26:00）が違うため、ここで保存すると
+      前日の割り当てが早朝の時刻で上書きされてしまう。
+      タップしたら前日へ移動できるようにする。
+    */
+    const carried = !!row.carried_from;
+    const editable = state.adminMode && !carried;
+    const tag = (state.adminMode) ? 'button' : 'div';
 
     /*
       名前に性別・年齢と職員の印を括弧で添える（例:「鈴木 花子（女42）」）。
@@ -599,11 +669,15 @@
     const who = personName(row.person_id) +
       (tags.length > 0 ? '（' + tags.join('・') + '）' : '');
 
-    return '<' + tag + (editable ? ' type="button"' : '') +
-      ' class="slot' + (editable ? ' slot--assignable' : '') + '"' +
+    return '<' + tag + (state.adminMode ? ' type="button"' : '') +
+      ' class="slot' + (editable ? ' slot--assignable' : '') +
+        (carried ? ' slot--carried' : '') + '"' +
       ' data-id="' + esc(row.id) + '"' +
+      (carried ? ' data-carried="' + esc(row.carried_from) + '"' : '') +
+      ' title="' + esc(assignmentTooltip(row)) + '"' +
       ' style="left:' + left + '%;width:' + width + '%;top:' + top + '">' +
-      '<span class="slot__time">' + esc(tl(row.start_time)) + '–' + esc(tl(row.end_time)) + '</span>' +
+      '<span class="slot__time">' + (carried ? '前日から ' : '') +
+        esc(tl(row.start_time)) + '–' + esc(tl(row.end_time)) + '</span>' +
       '<span class="slot__names">' + esc(who) + '</span>' +
       (row.note ? '<span class="slot__note">' + esc(row.note) + '</span>' : '') +
     '</' + tag + '>';
@@ -850,13 +924,6 @@
     '</button></li>';
   }
 
-  function loadLabel(minutes) {
-    if (!minutes) return '割当なし';
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    return (h > 0 ? h + '時間' : '') + (m > 0 ? m + '分' : '');
-  }
-
   // ------------------------------------------- 割り当ての編集（既にある帯）
 
   /**
@@ -943,6 +1010,36 @@
 
     $('f_unassign').addEventListener('click', function () {
       doUnassign(assignmentId);
+    });
+  }
+
+  /**
+   * 前日から続いている帯をタップしたとき。
+   *
+   * **ここでは直させない。** この画面の時刻（`02:00`）と保存値（`26:00`）が違うため、
+   * そのまま保存すると前日の割り当てが早朝の時刻で上書きされる。
+   * 元の日へ移動すれば、いつもの編集パネルで直せる。
+   */
+  function openCarriedModal(assignmentId, originDate) {
+    const row = assignmentOf(assignmentId);
+    if (!row) return;
+
+    openModal('前日から続いている割り当て',
+      '<p class="panelHead">' + esc(personName(row.person_id)) + 'さん</p>' +
+      '<p>' + esc(placeNameOf(row.place_id)) + '<br>' +
+        esc(originDate) + ' の ' +
+        esc(tl(row.origin_start_time)) + '–' + esc(tl(row.origin_end_time)) + '</p>' +
+      '<p class="hint">この割り当ては ' + esc(originDate) + ' に登録されています。' +
+        'ここは続きを表示しているだけなので、直すときは元の日を開いてください。</p>' +
+      '<div class="formActions"><div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">閉じる</button>' +
+        '<button type="button" class="btn btn--primary" id="c_go">' +
+          esc(originDate) + ' を開く</button>' +
+      '</div>');
+
+    $('c_go').addEventListener('click', function () {
+      closeModal();
+      loadDay(originDate).then(function () { openAssignmentPanel(assignmentId); });
     });
   }
 

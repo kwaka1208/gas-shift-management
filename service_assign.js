@@ -209,6 +209,44 @@ function resolvePerson_(personId, peopleById) {
 }
 
 /**
+ * 指定日のタイムライン上に載る割り当てを、すべて分単位で返す。
+ *
+ * **前後の日も見る。** 時刻は24時間制の延長で持つため（design.md 5.1）、
+ * 日をまたぐ割り当ては前日の行として存在する。日付の完全一致だけで探すと、
+ *   - 8/10 の `22:00–26:00` と 8/11 の `00:00–02:00`
+ * が「別の日だから重ならない」と判定され、**同じ場所に2人立つ**。
+ *
+ * 前日の行は24時間ぶん戻し、翌日の行は24時間ぶん進めて、この日の物差しに揃える。
+ *
+ * @param {?string} selfId 除外する割り当てID（編集中の自分自身）
+ * @return {Array<{start: number, end: number, place_id, person_id, start_time, end_time}>}
+ */
+function readDayTimeline_(date, selfId) {
+  const prev = addDays_(date, -1);
+  const next = addDays_(date, 1);
+
+  const rows = readTable_(SHEET_DEFS.ASSIGNMENTS, function (r) {
+    return r.id !== selfId && (r.date === date || r.date === prev || r.date === next);
+  });
+
+  const out = [];
+  rows.forEach(function (r) {
+    if (!isValidTimeStr_(r.start_time) || !isValidTimeStr_(r.end_time)) return;
+    const shift = r.date === prev ? -DAY_MINUTES_ : (r.date === next ? DAY_MINUTES_ : 0);
+    out.push({
+      start: toMinutes_(r.start_time) + shift,
+      end: toMinutes_(r.end_time) + shift,
+      place_id: trimStr_(r.place_id),
+      person_id: r.person_id,
+      // メッセージには**元の日付の時刻**を出す。シートと突き合わせられる方が直しやすい
+      start_time: r.start_time,
+      end_time: r.end_time
+    });
+  });
+  return out;
+}
+
+/**
  * 衝突を確かめる。**必ずロックの内側で、書く直前に呼ぶこと。**
  *
  * @param {Object} cleaned 検証済みの入力
@@ -219,13 +257,8 @@ function checkConflicts_(cleaned, personId, selfId, peopleById) {
   const start = toMinutes_(cleaned.start_time);
   const end = toMinutes_(cleaned.end_time);
 
-  const sameDay = readTable_(SHEET_DEFS.ASSIGNMENTS, function (r) {
-    return r.date === cleaned.date && r.id !== selfId;
-  });
-
-  const overlapping = sameDay.filter(function (a) {
-    if (!isValidTimeStr_(a.start_time) || !isValidTimeStr_(a.end_time)) return false;
-    return overlaps_(start, end, toMinutes_(a.start_time), toMinutes_(a.end_time));
+  const overlapping = readDayTimeline_(cleaned.date, selfId).filter(function (a) {
+    return overlaps_(start, end, a.start, a.end);
   });
 
   const placeById = indexById_(readTable_(SHEET_DEFS.PLACES));

@@ -275,6 +275,17 @@ input[type="date"] {
 .slot--editable, .slot--assignable { cursor: pointer; }
 .slot--editable:hover, .slot--assignable:hover { background: #e4eaf1; }
 
+/*
+  前日から続いている帯。**この日に登録されたものではない**ことが一目で分かるよう、
+  左端を破線にして淡くする。タップしても直接は直せない（前日へ移動する）。
+*/
+.slot--carried {
+  background: transparent;
+  border-style: dashed;
+  border-left: 3px dashed var(--fg-weak);
+  color: var(--fg-weak);
+}
+
 .slot__time { display: block; font-weight: 600; white-space: nowrap; }
 .slot__note { display: block; color: var(--fg-weak); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
