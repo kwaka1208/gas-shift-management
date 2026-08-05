@@ -302,9 +302,12 @@
   /**
    * 人ごとに「入れる時間」と「割り当て済み」を集める。
    *
-   * 出すのは**その日に関わりのある人だけ**（申告した人、または割り当てのある人）。
-   * 継続参加者でも申告が無ければ出さない。空行が並ぶと、空いている人を探すという
+   * 出すのは**その日に関わりのある人だけ**（入れる時間帯がある人、または割り当てのある人）。
+   * 申告の無いボランティアは出さない。空行が並ぶと、空いている人を探すという
    * 本来の目的が埋もれるため。
+   *
+   * **職員は毎日出る。** 申告が無くても、サーバーが既定の勤務時間帯を補って返すため
+   * （service_board.js `appendStaffDefaultAvailability_`）。
    */
   function buildPeopleRows() {
     const byPerson = {};
@@ -630,11 +633,8 @@
     const meta = person ? personMeta(person) : '';
     if (meta) lines.push(meta);
 
-    // その人がその日に申告した時間帯。申告外に入れていないかを確かめられる
-    const ranges = availabilityByPerson()[row.person_id] || [];
-    lines.push(ranges.length === 0
-      ? '申告なし'
-      : '申告: ' + ranges.map(function (r) { return ml(r.start) + '–' + ml(r.end); }).join('、'));
+    // その人がその日に入れる時間帯。申告外に入れていないかを確かめられる
+    lines.push(availabilityLabel(row.person_id, '申告なし'));
 
     if (row.note) lines.push('メモ: ' + row.note);
 
@@ -870,12 +870,19 @@
     return aStart < bEnd && bStart < aEnd;
   }
 
-  /** person_id → 可用時間帯（分）。職員の既定勤務時間帯はサーバーが補って返している */
+  /**
+   * person_id → 可用時間帯（分）。
+   *
+   * **職員の既定勤務時間帯はサーバーが補って返している**（service_board.js
+   * `appendStaffDefaultAvailability_`）。補われた区間には `virtual` が付いており、
+   * シートには存在しない。**本人の申告と同じ扱いで候補に出してよいが、
+   * 画面に「申告」と書いてはいけない。**
+   */
   function availabilityByPerson() {
     const map = {};
     state.availability.forEach(function (a) {
       (map[a.person_id] = map[a.person_id] || [])
-        .push({ start: toMin(a.start_time), end: toMin(a.end_time) });
+        .push({ start: toMin(a.start_time), end: toMin(a.end_time), virtual: a.virtual === true });
     });
     return map;
   }
@@ -1118,7 +1125,9 @@
     state.people.forEach(function (p) {
       if (p.merged_into) return;
       const ranges = avail[p.id] || [];
-      if (ranges.length === 0) return;   // その日の申告が無い人は出さない
+      // 入れる時間帯が無い人は出さない。職員には既定の勤務時間帯がサーバーで補われるので、
+      // 申告していなくても毎日ここに出る
+      if (ranges.length === 0) return;
 
       // タップした時間と重なる区間があればそれを、無ければ最初の区間を初期値にする
       const hit = (hintStart === null) ? null : ranges.filter(function (r) {
@@ -1131,7 +1140,9 @@
         load: load[p.id] || 0,
         preset_start: toHHMM(base.start),
         preset_end: toHHMM(base.end),
-        ranges: ranges.map(function (r) { return ml(r.start) + '–' + ml(r.end); }).join('、')
+        // 補われた既定の時間帯は「（既定）」と断る。本人の申告と読み違えないように
+        ranges: ranges.map(function (r) { return ml(r.start) + '–' + ml(r.end); }).join('、') +
+          (isDefaultOnly(ranges) ? '（既定）' : '')
       });
     });
 
@@ -1208,13 +1219,26 @@
     });
   }
 
-  /** その人が申告している時間帯の説明 */
-  function availabilityLabel(personId) {
+  /**
+   * その人がその日に入れる時間帯の説明。
+   *
+   * **サーバーが補った職員の既定勤務時間帯を「申告」と書かない。**
+   * 本人が出した申告と取り違えると、確認を取る相手や内容を間違える。
+   *
+   * @param {string=} emptyText 入れる時間帯が1つも無いときの文言
+   */
+  function availabilityLabel(personId, emptyText) {
     const ranges = availabilityByPerson()[personId] || [];
-    if (ranges.length === 0) return 'この日の申告はありません。';
-    return '申告: ' + ranges.map(function (r) {
+    if (ranges.length === 0) return emptyText || 'この日の申告はありません。';
+    const label = ranges.map(function (r) {
       return ml(r.start) + '–' + ml(r.end);
     }).join('、');
+    return isDefaultOnly(ranges) ? '職員の既定の勤務時間帯: ' + label : '申告: ' + label;
+  }
+
+  /** すべてサーバーが補った区間か（本人の申告が1つも無いか） */
+  function isDefaultOnly(ranges) {
+    return ranges.length > 0 && ranges.every(function (r) { return r.virtual; });
   }
 
   /**

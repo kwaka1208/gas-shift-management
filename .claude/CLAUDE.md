@@ -34,6 +34,8 @@ Google Apps Script（GAS）で構築する、場所×時間帯のシフト配置
 | メール・通知機能は作らない | スコープ外。連絡は既存の手段で行う |
 | 日付・時刻は文字列で保持する | `YYYY-MM-DD` / `HH:mm`。詳細は design.md 5.1 |
 | 人マスタは「使い捨て前提」で運用する | 単発参加者の重複・表記ゆれは許容し、名寄せは手動 |
+| **職員は申告が無くても毎日候補に出す**（`staff_default_*` を仮想的に補う） | 職員は勤務が前提で、毎日申告させる意味が薄い。**補った行を `availability` シートに書かないこと**（本人の申告と区別が付かなくなる）。申告がある日はそちらが優先 |
+| **職員の一括登録シート（`staff_import`）では日付は任意** | 上の決定により、ふつうは氏名だけでよい。日付を書く行は「その日だけ別の時間帯」を表す |
 
 ## 技術構成
 
@@ -51,9 +53,11 @@ service_board.js … 配置表の組み立て
 service_place.js … 場所の登録・編集
 service_assign.js… 割り当ての作成・編集・解除
 service_entry.js … 可用性の登録受付（応募フォーム）
+service_staff_import.js … 職員の一括登録（staff_import シートの取り込み）
 service_auth.js  … 閲覧トークンの検証とエディタ専用関数のガード
 repo_sheet.js    … シート読み書きの共通処理（バッチ前提）
 migrate.js       … 枠（slots）廃止にともなう1回きりのデータ移行
+menu.js          … スプレッドシートのメニュー（onOpen）。組み立て以外を書かない
 config.js        … シート定義・定数
 util.js          … 日付/時刻変換、区間の重なり判定など
 index.html       … 配置表（上=場所ごと／下=人ごと。style.html / script.html に分割）

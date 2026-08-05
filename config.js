@@ -84,6 +84,64 @@ const SHEET_DEFS = {
     ]
   },
 
+  /**
+   * 職員の一括登録用の入力シート（service_staff_import.js）。
+   *
+   * **人が手で書き込む唯一のシート。** ほかのシートと違い、記入するのは運用者なので
+   *   - 列にはヘッダーのメモ（`note`）で日本語の説明を付ける
+   *   - 未記入を許す列を多くし、既定値で補う
+   * ようにしてある。
+   *
+   * `status` / `person_id` / `imported_at` は**取り込み結果の書き戻し用**で、
+   * 人が書く列ではない。とくに `person_id` は再実行時の目印になっており、
+   * ここが埋まっている行は「同じ人への追記」として扱う（消すと別人が作られる）。
+   *
+   * `age` は数値ではなく文字列として読む。数値列にすると `42歳` のような書き方が
+   * 空欄と区別できなくなり、打ち間違いを黙って捨ててしまうため。
+   *
+   * 日付は**書かなくてよい。** 職員は既定の勤務時間帯で毎日候補に出るため
+   * （`staff_default_*`）、日付を書くのは「その日だけ別の時間帯」を表すときだけ。
+   */
+  STAFF_IMPORT: {
+    name: 'staff_import',
+    columns: [
+      { id: 'name', type: 'string', note: '氏名（必須）' },
+      { id: 'kana', type: 'string', note: 'ふりがな（任意）' },
+      {
+        id: 'gender', type: 'string',
+        note: '性別（任意）\nmale / female / other / undisclosed、または 男性 / 女性 / その他 / 回答しない\n未記入は「回答しない」として登録します'
+      },
+      { id: 'age', type: 'string', note: '年齢（任意）\n半角数字。未記入なら空のまま登録します' },
+      {
+        id: 'contact', type: 'string',
+        note: '連絡先（任意）\n同じ氏名でも連絡先が違えば別の人として登録します。\n配置表の画面には一切表示しません'
+      },
+      {
+        id: 'start_date', type: 'date',
+        note: '勤務する日（任意）\n2026-08-10 の形式。\n\n未記入でかまいません。職員は _config の staff_default_start〜staff_default_end の時間帯で毎日候補に出ます。\n「この日は早番」など、特定の日だけ別の時間帯にするときに書きます（書いた日は既定より優先されます）'
+      },
+      {
+        id: 'end_date', type: 'date',
+        note: '連続して勤務する最終日（任意）\n未記入なら開始日の1日だけ登録します'
+      },
+      {
+        id: 'start_time', type: 'time',
+        note: '開始時刻（任意）\n10:00 の形式。未記入なら _config の entry_default_start を使います。\n※ start_date を書いた行にだけ意味があります'
+      },
+      {
+        id: 'end_time', type: 'time',
+        note: '終了時刻（任意）\n17:00 の形式。24時以降は 26:00 のように書きます（翌2時）。\n未記入なら _config の entry_default_end を使います。\n※ start_date を書いた行にだけ意味があります'
+      },
+      { id: 'note', type: 'string', note: 'メモ（任意）\n配置表の画面には表示しません' },
+      { id: 'status', type: 'string', note: '【自動】取り込みの結果。消しても書き換えても構いません' },
+      {
+        id: 'person_id', type: 'string',
+        note: '【自動】登録した人のID。\nこの列が埋まっている行は、次に実行しても同じ人に追記します。\n消すと別の人として登録されます'
+      },
+      { id: 'imported_at', type: 'string', note: '【自動】取り込んだ日時' }
+    ]
+  },
+
   CONFIG: {
     name: '_config',
     hidden: true,
@@ -127,6 +185,20 @@ const GENDER = {
 const GENDER_VALUES = [GENDER.MALE, GENDER.FEMALE, GENDER.OTHER, GENDER.UNDISCLOSED];
 
 /**
+ * 一括登録シートで受け付ける性別の書き方（`service_staff_import.js`）。
+ *
+ * **応募フォームには使わない。** あちらは画面が選択肢を出すので、コードだけを受ければよい。
+ * こちらは人がシートに手で書くため、日本語の表記も通す。
+ */
+const GENDER_ALIASES = {
+  '男性': GENDER.MALE, '男': GENDER.MALE, 'm': GENDER.MALE,
+  '女性': GENDER.FEMALE, '女': GENDER.FEMALE, 'f': GENDER.FEMALE,
+  'その他': GENDER.OTHER, '他': GENDER.OTHER,
+  '回答しない': GENDER.UNDISCLOSED, '無回答': GENDER.UNDISCLOSED,
+  '未回答': GENDER.UNDISCLOSED, '不明': GENDER.UNDISCLOSED
+};
+
+/**
  * 受け付ける年齢の範囲。
  * 打ち間違い（西暦を入れた、桁を余分に打った）を弾くための上限で、
  * 参加できる年齢の制限ではない。運用上の可否は人が判断する。
@@ -145,10 +217,13 @@ const CONFIG_DEFAULTS = {
   day_start: '10:00',
   day_end: '17:00',
   slot_unit_minutes: '10',
-  // 登録画面（応募フォーム）に最初から入っている時間帯。
-  // 職員もこの画面から申告するため、職員の既定勤務時間帯はここで兼ねる
+  // 登録画面（応募フォーム）に最初から入っている時間帯
   entry_default_start: '10:00',
   entry_default_end: '17:00',
+  // 職員の既定の勤務時間帯。申告が無い日の職員は、この時間帯にいるものとして候補に出す
+  // （service_board.js `appendStaffDefaultAvailability_`）
+  staff_default_start: '10:00',
+  staff_default_end: '17:00',
   public_name_style: 'full'
 };
 
@@ -161,6 +236,8 @@ const CONFIG_KEY = {
   SLOT_UNIT_MINUTES: 'slot_unit_minutes',
   ENTRY_DEFAULT_START: 'entry_default_start',
   ENTRY_DEFAULT_END: 'entry_default_end',
+  STAFF_DEFAULT_START: 'staff_default_start',
+  STAFF_DEFAULT_END: 'staff_default_end',
   PUBLIC_NAME_STYLE: 'public_name_style'
 };
 
@@ -171,12 +248,13 @@ const CONFIG_KEY = {
  * **消さずに一覧で持っておく**ことで、`setup()` が「もう使っていない」と知らせられる。
  * 残っていても動作には影響しない。
  *
- *   staff_default_*  … 職員の既定勤務時間帯。職員も登録画面から申告する運用に変えたため廃止
  *   default_slot_*   … 枠が無い場所に破線で出していた「既定の枠」。機能ごと廃止
+ *
+ * **`staff_default_start` / `staff_default_end` は一度ここに入れたが、復活させた。**
+ * 職員を毎日候補に出す仕組みを戻したため（CONFIG_DEFAULTS 参照）。
+ * 以前この設定を使っていたシートでは、残っていた古い値がそのまま効く。
  */
 const CONFIG_RETIRED_KEYS = [
-  'staff_default_start',
-  'staff_default_end',
   'default_slot_start',
   'default_slot_end',
   'default_slot_required'
@@ -188,6 +266,18 @@ const CONFIG_RETIRED_KEYS = [
  * 名前を変えて残す（`slots_old_...`）。
  */
 const RETIRED_SHEET_NAMES = ['slots', 'slot_templates'];
+
+/**
+ * 一括登録シートから一度に取り込む行数の上限。
+ * 実行時間の上限（6分）に当たって中途半端に書き込まれるのを防ぐための歯止め。
+ */
+const STAFF_IMPORT_MAX_ROWS = 500;
+
+/**
+ * 1行で指定できる勤務日数の上限（開始日〜終了日）。
+ * 終了日の打ち間違い（年を間違える等）で可用性が大量に作られるのを防ぐ。
+ */
+const STAFF_IMPORT_MAX_DAYS = 62;
 
 /** LockService の待機時間（ミリ秒） */
 const LOCK_TIMEOUT_MS = 10000;

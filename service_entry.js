@@ -275,6 +275,10 @@ function findOrCreatePerson_(input) {
  *
  * **可用な時間が減ることはない。** 既存の行が新しい行に吸収される場合だけ削除し、
  * 表現としての行を整理する（例: 09:00-12:00 と 11:00-13:00 → 09:00-13:00 の1行）。
+ *
+ * 同じ規則で「人×日」をまとめて処理する版が
+ * `addAvailabilityBatch_`（service_staff_import.js）にある。**規則を変えるときは両方直すこと。**
+ * こちらは応募受付が使う経路なので、一括登録の都合で書き換えない。
  */
 function addAvailability_(personId, date, newRanges) {
   const existing = readTable_(SHEET_DEFS.AVAILABILITY, function (r) {

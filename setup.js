@@ -79,6 +79,7 @@ function ensureSheet_(def) {
   if (sheet.getFrozenRows() < 1) sheet.setFrozenRows(1);
 
   applyTextFormat_(sheet, def);
+  applyHeaderNotes_(sheet, def);
 
   const parts = [];
   if (created) parts.push('作成');
@@ -102,6 +103,31 @@ function applyTextFormat_(sheet, def) {
     if (i === undefined) return;
     sheet.getRange(1, i + 1, maxRows, 1).setNumberFormat('@');
   });
+}
+
+/**
+ * ヘッダーのセルに日本語の説明をメモとして付ける（`note` を持つ列だけ）。
+ *
+ * 人が手で書き込むシート（`staff_import`）のためのもの。列名は英語のままにして
+ * コード側の規約（ヘッダー名で列を引く）を崩さず、書き方の説明だけをシート上に置く。
+ *
+ * **メモは1回の setNotes でまとめて書く。** 定義に無い列のメモは消える点に注意。
+ */
+function applyHeaderNotes_(sheet, def) {
+  const hasNote = def.columns.some(function (c) { return !!c.note; });
+  if (!hasNote) return;
+
+  const colMap = getColumnMap_(sheet);
+  const width = sheet.getLastColumn();
+  if (width < 1) return;
+
+  const notes = new Array(width).fill('');
+  def.columns.forEach(function (col) {
+    const i = colMap[col.id];
+    if (i === undefined || !col.note) return;
+    notes[i] = col.note;
+  });
+  sheet.getRange(1, 1, 1, width).setNotes([notes]);
 }
 
 /** `_config` に既定値を投入する。既に値があるキーは上書きしない */

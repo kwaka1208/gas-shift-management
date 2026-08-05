@@ -101,9 +101,14 @@ function buildDayBoard_(date, admin) {
   }
   const nameStyle = getConfigValue_(CONFIG_KEY.PUBLIC_NAME_STYLE, 'full');
 
+  // 人マスタはここで1回だけ読む。可用性の補完（職員の既定勤務時間帯）と
+  // 「その日に必要な人」の絞り込みの両方が人マスタを要るため
+  const allPeople = readTable_(SHEET_DEFS.PEOPLE);
+
   const assignments = readAssignmentsByDate_(date);
-  const availability = readAvailabilityByDate_(date);
-  const people = readRelatedPeople_(assignments, availability);
+  const availability = appendStaffDefaultAvailability_(
+    readAvailabilityByDate_(date), allPeople, date);
+  const people = readRelatedPeople_(assignments, availability, allPeople);
 
   return {
     date: date,
@@ -219,8 +224,8 @@ function placeOrderMap_() {
  * 名寄せ済み（`merged_into` あり）の人は、統合先の人に読み替える。
  * 過去の割り当てが統合元を指したままでも表示が壊れないようにするため。
  */
-function readRelatedPeople_(assignments, availability) {
-  const all = readTable_(SHEET_DEFS.PEOPLE);
+function readRelatedPeople_(assignments, availability, allPeople) {
+  const all = allPeople || readTable_(SHEET_DEFS.PEOPLE);
   const byId = indexById_(all);
 
   const wanted = new Set();
@@ -248,17 +253,61 @@ function resolvePersonId_(personId, byId) {
   return id;
 }
 
-/*
-  かつてここには appendStaffDefaultAvailability_ があった。
+/**
+ * 申告の無い職員に、既定の勤務時間帯（`staff_default_*`）を仮想的に足す。
+ *
+ * **シートには1行も書かない。** 返す配列の上だけで足す。書いてしまうと
+ *   - 本人が実際に申告した行と見分けが付かなくなる
+ *   - 既定を変えても書いた行は変わらず、静かに食い違う
+ *   - 日付を開くたびに行が増える
+ * ため。**この仕組みは一度廃止して復活させた。** 廃止したときに「戻すなら
+ * 仮想の行をシートに書かないという原則だけは守ること」と書き残していた決まりを引き継ぐ。
+ *
+ * 足す相手は「職員」かつ `is_recurring` かつ名寄せされていない人。
+ * 候補から外したい職員（退職者など）は `is_recurring` を FALSE にする。
+ *
+ * **その日に本人の申告がある職員には足さない。** 「その日は13時から」と申告した職員に
+ * 既定を重ねると、申告した意味が無くなる。
+ *
+ * ただし**前日から繰り越した行は「その日の申告」と数えない**（`carried_from` が付いた行）。
+ * 前夜 22:00〜26:00 を申告した職員は翌日の 00:00〜02:00 にも居ることになるが、
+ * それは前日の勤務の続きであって、その日の勤務を申告したわけではない。
+ */
+function appendStaffDefaultAvailability_(availability, allPeople, date) {
+  const start = getConfigValue_(CONFIG_KEY.STAFF_DEFAULT_START, CONFIG_DEFAULTS.staff_default_start);
+  const end = getConfigValue_(CONFIG_KEY.STAFF_DEFAULT_END, CONFIG_DEFAULTS.staff_default_end);
 
-  申告の無い職員に `_config` の既定勤務時間帯を仮想的に足す仕組みだったが、
-  **職員も登録画面から申告する運用に変えたため廃止した**（登録画面の初期値が
-  `entry_default_start` / `entry_default_end` で入っているので、そのまま送れば同じ結果になる）。
+  // 設定が壊れていても配置表そのものは出す。補完だけを諦める
+  if (!isValidTimeStr_(start) || !isValidTimeStr_(end) || toMinutes_(start) >= toMinutes_(end)) {
+    console.error('staff_default_start / staff_default_end が不正です: ' + start + '〜' + end);
+    return availability;
+  }
 
-  結果として、availability は「本人が申告した行」だけになった。
-  **職員も申告しない限り候補に出ない。** 補完を戻したくなったときは、
-  「仮想の行をシートに書かない」という原則だけは必ず守ること。
-*/
+  const declared = {};
+  availability.forEach(function (a) {
+    if (a.carried_from) return;
+    declared[a.person_id] = true;
+  });
+
+  const added = [];
+  allPeople.forEach(function (p) {
+    if (trimStr_(p.type) !== PERSON_TYPE.STAFF) return;
+    if (p.is_recurring !== true) return;
+    if (trimStr_(p.merged_into)) return;
+    if (declared[p.id]) return;
+    added.push({
+      // シートに無い行。実在のIDと衝突しない形にして、取り違えを防ぐ
+      id: 'default:' + p.id + ':' + date,
+      person_id: p.id,
+      date: date,
+      start_time: start,
+      end_time: end,
+      virtual: true
+    });
+  });
+
+  return availability.concat(added);
+}
 
 // ---------------------------------------------------------------------------
 // 人の公開用整形
