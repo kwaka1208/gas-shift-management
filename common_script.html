@@ -84,17 +84,27 @@ const App = (function () {
 
     応募フォームの選択肢と配置表の表示を、この1か所から作る。
     片方だけ直して表示が食い違う、という壊れ方を避けるため。
+
+    `short` は配置表に出す短縮形。**空の選択肢は配置表に出さない。**
+    「その他」「回答しない」は、配置表に並べても割り当ての判断材料にならないうえ、
+    答えなかったこと自体が一覧で目立ってしまうため出さない。
+    ただし応募者本人の控えには選んだとおりに出す（`genderLabel`）。
   */
   const GENDER_OPTIONS = [
-    { value: 'male', label: '男性' },
-    { value: 'female', label: '女性' },
-    { value: 'other', label: 'その他' },
-    { value: 'undisclosed', label: '回答しない' }
+    { value: 'male', label: '男性', short: '男' },
+    { value: 'female', label: '女性', short: '女' },
+    { value: 'other', label: 'その他', short: '' },
+    { value: 'undisclosed', label: '回答しない', short: '' }
   ];
+
+  /** 保存値 → 選択肢。未登録・不明な値は null */
+  function genderOption(value) {
+    return GENDER_OPTIONS.filter(function (o) { return o.value === value; })[0] || null;
+  }
 
   /** 保存値 → 表示名。未登録・不明な値は空文字（表示しない） */
   function genderLabel(value) {
-    const hit = GENDER_OPTIONS.filter(function (o) { return o.value === value; })[0];
+    const hit = genderOption(value);
     return hit ? hit.label : '';
   }
 
@@ -218,6 +228,7 @@ const App = (function () {
     appUrl: appUrl,
     esc: esc,
     GENDER_OPTIONS: GENDER_OPTIONS,
+    genderOption: genderOption,
     genderLabel: genderLabel,
     toMin: toMin,
     toHHMM: toHHMM,

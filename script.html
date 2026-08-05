@@ -633,8 +633,15 @@
     const list = assignmentsOfSlot(slot.id);
     // **必要人数は画面に出さない**（場所単位で管理する方針）。名前が入っているかを見せる
     const meta = virtual ? '既定の枠' : (list.length === 0 ? '未割当' : list.length + '名');
+    /*
+      名前に続けて性別・年齢と職員の印を括弧でまとめる（例: 「鈴木 花子（女42）」
+      「伊藤 誠（男38・職）」）。帯は1行で `…` に切られるため、括弧の中身は最小限にする。
+      管理URL以外では性別・年齢が空になり、従来どおり「（職）」だけが付く。
+    */
     const names = list.map(function (a) {
-      return personName(a.person_id) + (isStaff(a.person_id) ? '（職）' : '');
+      const tags = [personMetaShort(personOf(a.person_id)), isStaff(a.person_id) ? '職' : '']
+        .filter(function (t) { return t; });
+      return personName(a.person_id) + (tags.length > 0 ? '（' + tags.join('・') + '）' : '');
     }).join('、');
 
     return '<' + tag + (assignable ? ' type="button"' : '') +
@@ -881,22 +888,44 @@
     return p ? p.name : '(不明な人)';
   }
 
-  /**
-   * 性別・年齢の表示（例: 「女性 / 42歳」）。無ければ空文字。
-   *
-   * サーバーは管理画面からの呼び出しにだけ gender / age を載せてくるので、
-   * ここで adminMode を見る必要は無い。閲覧画面では単に空文字になる。
-   * 列を追加する前に登録された人は未入力なので、**あるものだけを出す。**
-   */
+  /*
+    性別・年齢の表示。
+
+    サーバーは管理画面からの呼び出しにだけ gender / age を載せてくるので、
+    ここで adminMode を見る必要は無い。閲覧画面では単に空文字になる。
+
+    **あるものだけを出す。** 列を追加する前に登録された人は未入力であり、
+    「その他」「回答しない」を選んだ人の性別は配置表に出さない（GENDER_OPTIONS の short）。
+    そのため「性別だけ」「年齢だけ」「どちらも無し」のすべてが起こりうる。
+  */
+
+  /** 一覧向け（例: 「女性 / 42歳」）。無ければ空文字 */
   function personMeta(person) {
-    if (!person) return '';
+    return personMetaParts(person, 'label', '歳').join(' / ');
+  }
+
+  /**
+   * 枠の帯向けの短縮形（例: 「女42」）。無ければ空文字。
+   * 帯は1行で、はみ出すと `…` で切られるため、区切り文字も「歳」も入れずに詰める。
+   */
+  function personMetaShort(person) {
+    return personMetaParts(person, 'short', '').join('');
+  }
+
+  /**
+   * @param {string} genderKey GENDER_OPTIONS のどの表記を使うか（'label' / 'short'）
+   * @param {string} ageSuffix 年齢に添える文字（'歳' / ''）
+   */
+  function personMetaParts(person, genderKey, ageSuffix) {
+    if (!person) return [];
     const parts = [];
-    const gender = App.genderLabel(person.gender);
-    if (gender) parts.push(gender);
+    // short が空の性別（その他・回答しない）は、どちらの表記でも出さない
+    const opt = App.genderOption(person.gender);
+    if (opt && opt.short) parts.push(opt[genderKey]);
     if (person.age !== null && person.age !== undefined && person.age !== '') {
-      parts.push(person.age + '歳');
+      parts.push(person.age + ageSuffix);
     }
-    return parts.join(' / ');
+    return parts;
   }
 
   function isStaff(personId) {
