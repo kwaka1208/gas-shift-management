@@ -48,9 +48,26 @@ function savePlacesData_(places, operator) {
       : Number(p.sort_order);
     if (!isFinite(order)) errors.push(label + ': 表示順は数値で指定してください。');
 
-    return { id: id, name: name, sort_order: order, active: p.active !== false };
+    // 空欄は「色なし」。知らない値は弾く（画面側の CSS に無い色を保存させない）
+    const color = trimStr_(p.color);
+    if (color && PLACE_COLORS.indexOf(color) === -1) {
+      errors.push(label + ': 背景色の指定が正しくありません。');
+    }
+
+    return { id: id, name: name, sort_order: order, active: p.active !== false, color: color };
   });
   if (errors.length > 0) throw new Error(errors.join('\n'));
+
+  /*
+    color 列が無いシート（列を足す前の setup() で作られたもの）に色を保存しようとしたら
+    止める。`insertRows_` は定義に無い列を黙って捨てるため、そのままだと
+    「保存できたのに色が付かない」という、原因の分からない壊れ方になる。
+  */
+  const wantsColor = cleaned.some(function (p) { return p.color !== ''; });
+  if (wantsColor && getColumnMap_(getSheet_(SHEET_DEFS.PLACES)).color === undefined) {
+    throw new Error('places シートに color 列がありません。' +
+      'スクリプトエディタから setup() を1回実行してください。');
+  }
 
   // --- 差分だけ書く -------------------------------------------------------
   const inserts = [];
@@ -63,7 +80,8 @@ function savePlacesData_(places, operator) {
     const current = byId.get(p.id);
     if (current.name !== p.name ||
         Number(current.sort_order) !== p.sort_order ||
-        current.active !== p.active) {
+        current.active !== p.active ||
+        trimStr_(current.color) !== p.color) {
       updates.push(p);
     }
   });

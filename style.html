@@ -21,6 +21,20 @@
   --res-free: #e6ebf1;
   --res-free-line: #ccd5df;
 
+  /*
+    場所（役割）の背景色。**淡い色だけを用意する。**
+    黒い文字と、この上に重なる割り当ての帯（--slot-bg）が読める濃さに留めること。
+    キーの一覧は config.js の PLACE_COLORS、名前は common_script.html の PLACE_COLOR_OPTIONS。
+  */
+  --tint-red: #fde8e8;
+  --tint-orange: #fbeddc;
+  --tint-yellow: #f9f3cf;
+  --tint-green: #e4f3e2;
+  --tint-blue: #e3edfb;
+  --tint-purple: #eee7f8;
+  --tint-gray: #e9ebee;
+  --tint-brown: #efe6dc;
+
   /* 画面の左右の余白。狭い画面では小さく、広い画面では大きくする */
   --gutter: .75rem;
 
@@ -252,6 +266,36 @@ input[type="date"] {
 
 .board__lanes--editable,
 .board__lanes--assignable { cursor: copy; }
+
+/*
+  場所ごとの背景色（data-color）。
+
+  **場所名の欄とタイムラインの両方に敷く。** 場所名の列は横スクロールしても左に
+  貼り付くので、片方だけ塗ると、スクロールしたときに色が途切れて見える。
+  貼り付く列は下の行が透けてはいけないため、色は不透明のものを使うこと。
+
+  人ごとのセクションも同じ .board__row を使うが、data-color が付かないので影響しない。
+*/
+.board__row[data-color="red"] { --place-tint: var(--tint-red); }
+.board__row[data-color="orange"] { --place-tint: var(--tint-orange); }
+.board__row[data-color="yellow"] { --place-tint: var(--tint-yellow); }
+.board__row[data-color="green"] { --place-tint: var(--tint-green); }
+.board__row[data-color="blue"] { --place-tint: var(--tint-blue); }
+.board__row[data-color="purple"] { --place-tint: var(--tint-purple); }
+.board__row[data-color="gray"] { --place-tint: var(--tint-gray); }
+.board__row[data-color="brown"] { --place-tint: var(--tint-brown); }
+
+.board__row[data-color] .board__place,
+.board__row[data-color] .board__lanes { background-color: var(--place-tint); }
+
+@media print {
+  /* 背景色は既定で印刷されない。役割の色分けは印刷しても残す */
+  .board__row[data-color] .board__place,
+  .board__row[data-color] .board__lanes {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
 
 /* ------------------------------------------------------------ 割り当ての帯 */
 
@@ -545,10 +589,48 @@ input[type="date"] {
 
 .placeList li {
   display: flex;
+  flex-direction: column;
+  gap: .375rem;
+  padding: .5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.placeList__main {
+  display: flex;
   align-items: center;
   gap: .5rem;
-  padding: .375rem 0;
-  border-bottom: 1px solid var(--line);
+}
+
+/* 色の選択。スマホでの誤タップを避けるため 44px を確保する（要件 5） */
+.colorPick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+}
+
+.colorPick__btn {
+  flex: 0 0 auto;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.colorPick__btn--none {
+  width: auto;
+  min-width: 2.75rem;
+  padding: 0 .5rem;
+  font-size: .75rem;
+  color: var(--fg-weak);
+}
+
+/* 選択中はふちを太くする。色そのものが薄いので、枠で分かるようにしている */
+.colorPick__btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-weak);
 }
 
 .placeList input[type="text"] { flex: 1; min-width: 0; }

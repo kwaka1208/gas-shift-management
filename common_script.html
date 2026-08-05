@@ -97,6 +97,27 @@ const App = (function () {
     { value: 'undisclosed', label: '回答しない', short: '' }
   ];
 
+  /*
+    場所（役割）の背景色。
+
+    保存するのは**キーだけ**で、実際の色は style.html の `--tint-*` が決める
+    （サーバー側の受け入れ値は config.js の `PLACE_COLORS`）。
+    **値を足すときは3か所とも直す。**
+
+    先頭の「なし」は保存値が空文字。色を付けない場所のほうが多いので、既定はこれ。
+  */
+  const PLACE_COLOR_OPTIONS = [
+    { value: '', label: 'なし' },
+    { value: 'red', label: '赤' },
+    { value: 'orange', label: '橙' },
+    { value: 'yellow', label: '黄' },
+    { value: 'green', label: '緑' },
+    { value: 'blue', label: '青' },
+    { value: 'purple', label: '紫' },
+    { value: 'gray', label: '灰' },
+    { value: 'brown', label: '茶' }
+  ];
+
   /** 保存値 → 選択肢。未登録・不明な値は null */
   function genderOption(value) {
     return GENDER_OPTIONS.filter(function (o) { return o.value === value; })[0] || null;
@@ -261,6 +282,7 @@ const App = (function () {
     appUrl: appUrl,
     esc: esc,
     GENDER_OPTIONS: GENDER_OPTIONS,
+    PLACE_COLOR_OPTIONS: PLACE_COLOR_OPTIONS,
     genderOption: genderOption,
     genderLabel: genderLabel,
     toMin: toMin,

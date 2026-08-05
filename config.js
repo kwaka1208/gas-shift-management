@@ -22,6 +22,8 @@ const SHEET_DEFS = {
       { id: 'name', type: 'string' },
       { id: 'sort_order', type: 'number' },
       { id: 'active', type: 'boolean' },
+      // 配置表で行の背景に敷く色。空欄は「色なし」。PLACE_COLORS のキーだけを入れる
+      { id: 'color', type: 'string' },
       { id: 'created_at', type: 'string' },
       { id: 'updated_at', type: 'string' }
     ]
@@ -163,6 +165,19 @@ const SHEET_DEFS = {
     ]
   }
 };
+
+/**
+ * 場所（役割）の背景色として受け付けるキー。
+ *
+ * **色そのもの（`#fde8e8` など）は保存しない。** 実際の色は画面側の CSS が決める。
+ *   - 濃さを直したいときに、保存済みのデータを触らずに済む
+ *   - 文字が読めなくなる色を選べない（淡い色だけを用意する）
+ * ため。空欄は「色なし」。
+ *
+ * 画面側の対応表は `common_script.html` の `PLACE_COLOR_OPTIONS`、
+ * 実際の色は `style.html` の `--tint-*`。**値を足すときは3か所とも直す。**
+ */
+const PLACE_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray', 'brown'];
 
 /** 人の種別 */
 const PERSON_TYPE = {

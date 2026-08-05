@@ -564,7 +564,10 @@
     // ただし places に無い場所には入れさせない（行き場の無い割り当てが増えるだけ）
     const assignable = state.adminMode && !place.missing;
 
-    return '<div class="board__row">' +
+    // 背景色は行そのものに付ける。場所名の欄とタイムラインの両方が同じ色になり、
+    // 横スクロールしてもどの役割の行かを見失わない
+    return '<div class="board__row"' +
+        (place.color ? ' data-color="' + esc(place.color) + '"' : '') + '>' +
       '<div class="board__place' + (place.active ? '' : ' board__place--off') + '">' +
         esc(place.name) +
         (place.missing ? '<small>（places にありません）</small>'
@@ -747,11 +750,24 @@
       '<button type="button" class="btn" id="p_add">＋ 場所を追加</button>' +
       '<p class="hint">チェックを外すと配置表に表示されなくなります。' +
         '過去の配置表を保つため、行そのものは残ります。</p>' +
+      '<p class="hint">色は「役割ごと」の行の背景になります。' +
+        '同じ持ち場をまとめて見分けたいときに使ってください。</p>' +
       '<div class="formActions">' +
         '<div class="formActions__spacer"></div>' +
         '<button type="button" class="btn" data-close="1">キャンセル</button>' +
         '<button type="button" class="btn btn--primary" id="p_save">保存</button>' +
       '</div>');
+
+    // 色は行ごとに1つだけ。押されたボタンを選択状態にし、同じ行の他を外す
+    $('placeList').addEventListener('click', function (e) {
+      const btn = e.target.closest ? e.target.closest('.colorPick__btn') : null;
+      if (!btn) return;
+      const li = btn.closest('li');
+      li.dataset.color = btn.dataset.color;
+      li.querySelectorAll('.colorPick__btn').forEach(function (el) {
+        el.setAttribute('aria-pressed', el === btn ? 'true' : 'false');
+      });
+    });
 
     $('p_add').addEventListener('click', function () {
       const order = $('placeList').children.length + 1;
@@ -766,7 +782,8 @@
           id: li.dataset.id,
           name: li.querySelector('.name').value,
           sort_order: li.querySelector('.order').value,
-          active: li.querySelector('.active').checked
+          active: li.querySelector('.active').checked,
+          color: li.dataset.color || ''
         };
       }).filter(function (p) { return p.id || p.name.trim() !== ''; });
 
@@ -785,12 +802,33 @@
     });
   }
 
+  /**
+   * 場所1件の編集行。
+   *
+   * 選んだ色は `<li>` の data-color に持つ。**入力欄を増やさない**のは、
+   * 保存時に読む場所を1か所（li）にまとめておくため。
+   */
   function placeRowHtml(p) {
-    return '<li data-id="' + esc(p.id) + '">' +
-      '<input type="number" class="order" value="' + Number(p.sort_order || 0) + '" aria-label="表示順">' +
-      '<input type="text" class="name" value="' + esc(p.name) + '" placeholder="場所名" aria-label="場所名">' +
-      '<label class="toggle"><input type="checkbox" class="active"' + (p.active ? ' checked' : '') +
-        '><span>表示</span></label>' +
+    const color = p.color || '';
+    return '<li data-id="' + esc(p.id) + '" data-color="' + esc(color) + '">' +
+      '<div class="placeList__main">' +
+        '<input type="number" class="order" value="' + Number(p.sort_order || 0) + '" aria-label="表示順">' +
+        '<input type="text" class="name" value="' + esc(p.name) + '" placeholder="場所名" aria-label="場所名">' +
+        '<label class="toggle"><input type="checkbox" class="active"' + (p.active ? ' checked' : '') +
+          '><span>表示</span></label>' +
+      '</div>' +
+      '<div class="colorPick" role="group" aria-label="背景色">' +
+        App.PLACE_COLOR_OPTIONS.map(function (o) {
+          return '<button type="button" class="colorPick__btn' +
+              (o.value ? '' : ' colorPick__btn--none') + '"' +
+            ' data-color="' + esc(o.value) + '"' +
+            (o.value ? ' style="background:var(--tint-' + esc(o.value) + ')"' : '') +
+            ' aria-pressed="' + (o.value === color ? 'true' : 'false') + '"' +
+            ' aria-label="背景色: ' + esc(o.label) + '" title="' + esc(o.label) + '">' +
+            (o.value ? '' : 'なし') +
+          '</button>';
+        }).join('') +
+      '</div>' +
     '</li>';
   }
 

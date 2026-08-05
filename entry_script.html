@@ -114,7 +114,11 @@
       '<div class="rangeList"></div>' +
       '<div class="rangeActions">' +
         '<button type="button" class="btn btn--small addRange">＋ 時間帯を追加</button>' +
-      '</div>';
+      '</div>' +
+      // 使い方はボタンのすぐ下に置く。フォーム末尾にまとめると、
+      // 入力している場所から離れてしまい読まれない
+      '<p class="hint">一日の中で複数の時間帯に入れる方は「＋ 時間帯を追加」で分けて入力してください。' +
+        '（例: 10:00〜12:00 と 15:00〜17:00）</p>';
 
     $('dayList').appendChild(block);
 

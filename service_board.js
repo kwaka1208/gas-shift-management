@@ -69,7 +69,9 @@ function readPlaces_() {
       id: p.id,
       name: p.name,
       sort_order: p.sort_order === null ? 0 : p.sort_order,
-      active: p.active
+      active: p.active,
+      // 知らない色は返さない。シートを手で書き換えられても画面が壊れないようにする
+      color: PLACE_COLORS.indexOf(trimStr_(p.color)) === -1 ? '' : trimStr_(p.color)
     };
   });
 }
