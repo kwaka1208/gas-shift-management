@@ -903,6 +903,33 @@
     return p ? p.name : '(不明な場所)';
   }
 
+  /**
+   * 絞り込み用の正規化。
+   * カタカナはひらがなに、全角英数は半角に寄せ、空白と大小の違いは無視する。
+   * 「タナカ」でも「たなか」でも同じ人に当たるようにするための最低限。
+   * 半角カナまでは面倒を見ない（人マスタにも入力にもまず出てこない）。
+   */
+  function normalizeForSearch(text) {
+    return String(text === null || text === undefined ? '' : text)
+      .replace(/[ァ-ヶ]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0x60);
+      })
+      .replace(/[！-～]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xfee0);
+      })
+      .replace(/[\s　]/g, '')
+      .toLowerCase();
+  }
+
+  /**
+   * 氏名とかなを別々に正規化してタブでつなぐ。
+   * つなぎ目に空白を使うと、正規化で空白が消えて「田中」＋「たなか」が
+   * 1つの語のように繋がり、跨いだ検索語が誤ってヒットする。
+   */
+  function personSearchKey(person) {
+    return [person.name, person.kana].map(normalizeForSearch).join('\t');
+  }
+
   /** 半開区間 [aStart, aEnd) と [bStart, bEnd)。接するだけは重ならない（design.md 6.1） */
   function overlapsRange(aStart, aEnd, bStart, bEnd) {
     return aStart < bEnd && bStart < aEnd;
@@ -945,14 +972,21 @@
     return String(ak).localeCompare(String(bk), 'ja');
   }
 
-  /** ボランティアと職員に分けて並べる。ボランティア優先が画面から分かるようにする */
+  /**
+   * ボランティアと職員に分けて並べる。ボランティア優先が画面から分かるようにする。
+   *
+   * 見出しとリストを1つの箱にまとめてあるのは、絞り込みで中身が空になったとき
+   * 見出しごと隠すため（`setUpPickFilter`）。
+   */
   function volunteerStaffHtml(rows, rowFn) {
     const volunteers = rows.filter(function (r) { return r.person.type !== 'staff'; });
     const staff = rows.filter(function (r) { return r.person.type === 'staff'; });
-    return (volunteers.length > 0
-        ? '<h4>ボランティア</h4><ul class="pList">' + volunteers.map(rowFn).join('') + '</ul>' : '') +
-      (staff.length > 0
-        ? '<h4>職員</h4><ul class="pList">' + staff.map(rowFn).join('') + '</ul>' : '');
+    const group = function (label, list) {
+      if (list.length === 0) return '';
+      return '<div class="pickGroup"><h4>' + label + '</h4>' +
+        '<ul class="pList">' + list.map(rowFn).join('') + '</ul></div>';
+    };
+    return group('ボランティア', volunteers) + group('職員', staff);
   }
 
   /**
@@ -961,7 +995,8 @@
    */
   function pickRowHtml(attrs, person, note) {
     const meta = personMeta(person);
-    return '<li><button type="button" class="pRow pRow--pick" ' + attrs + '>' +
+    return '<li data-search="' + esc(personSearchKey(person)) + '">' +
+      '<button type="button" class="pRow pRow--pick" ' + attrs + '>' +
       '<span class="pName">' + esc(person.name) +
         (meta ? '<small class="pMeta">' + esc(meta) + '</small>' : '') + '</span>' +
       '<span class="pLoad">' + esc(note) + '</span>' +
@@ -1131,8 +1166,12 @@
       (rows.length === 0
         ? '<p class="empty empty--sm">この日に入れる人がまだいません。' +
           '応募フォームからの登録をお待ちください。</p>'
-        : '<section class="assignSec">' +
+        : '<div class="field"><label for="pickFilter">名前で絞り込む</label>' +
+            '<input type="search" id="pickFilter" autocomplete="off"' +
+            ' placeholder="氏名・かなの一部"></div>' +
+          '<section class="assignSec">' +
             volunteerStaffHtml(rows, dayCandidateRowHtml) +
+            '<p class="empty empty--sm" id="pickNoHit" hidden>該当する人がいません。</p>' +
           '</section>') +
       '<div class="formActions"><div class="formActions__spacer"></div>' +
         '<button type="button" class="btn" data-close="1">閉じる</button></div>');
@@ -1145,6 +1184,50 @@
         }, function () { openNewAssignPanel(placeId, preset); });
       });
     });
+
+    setUpPickFilter();
+  }
+
+  /**
+   * 人の一覧をその場で絞り込む。
+   *
+   * 一覧を組み直さずに行の表示・非表示だけを切り替える。
+   * 組み直すと入力欄が作り直されてフォーカスと変換中の文字が飛ぶ。
+   */
+  function setUpPickFilter() {
+    const input = $('pickFilter');
+    if (!input) return;
+
+    const body = $('modalBody');
+    const items = Array.prototype.slice.call(body.querySelectorAll('.pList > li'));
+    const groups = Array.prototype.slice.call(body.querySelectorAll('.pickGroup'));
+    const noHit = $('pickNoHit');
+
+    const apply = function () {
+      const q = normalizeForSearch(input.value);
+      let hit = 0;
+      items.forEach(function (li) {
+        const ok = !q || (li.dataset.search || '').indexOf(q) >= 0;
+        li.hidden = !ok;
+        if (ok) hit += 1;
+      });
+      groups.forEach(function (g) {
+        g.hidden = !g.querySelector('li:not([hidden])');
+      });
+      noHit.hidden = hit > 0;
+    };
+
+    input.addEventListener('input', apply);
+    // 入力中の Enter でモーダルが閉じたり送信されたりしないように止める
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') e.preventDefault();
+    });
+
+    // キーボードのある端末だけ最初からフォーカスする。
+    // スマホで自動フォーカスすると、開くたびにソフトキーボードが一覧を覆う
+    if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+      input.focus();
+    }
   }
 
   /**

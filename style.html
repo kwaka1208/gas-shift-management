@@ -682,6 +682,22 @@ input[type="date"] {
 
 .empty--sm { padding: .75rem 0; text-align: left; font-size: .8125rem; }
 
+/*
+  絞り込みの入力欄。iOS の既定の見た目（内側の影・角丸）が
+  .field input の枠と二重に見えるので消す。×印は残す
+*/
+.field input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.field input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: searchfield-cancel-button;
+}
+
+/* 見出しとリストの箱。絞り込みで空になったら箱ごと隠す */
+.pickGroup:first-of-type h4 { margin-top: 0; }
+
 .pList { list-style: none; margin: 0; padding: 0; }
 
 /*
