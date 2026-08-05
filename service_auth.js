@@ -79,6 +79,7 @@ function regenerateViewToken() {
   console.log('新しい閲覧トークン: ' + token);
   console.log('新しい閲覧URL: ' + buildViewUrl_(token));
   console.log('※ 以前のURL・QRコードは使えなくなりました。配り直してください。');
+  warnIfNotDeployedUrl_();
   return token;
 }
 
@@ -113,12 +114,79 @@ function constantTimeEquals_(a, b) {
  * HtmlService の画面は iframe（サンドボックス）の中で動くため、`?t=...` のような
  * 相対URLは googleusercontent.com のサンドボックスURLに対して解決されてしまい、
  * アプリのURLにならない。
+ *
+ * 【なぜ `_config` を先に見るのか】
+ * `ScriptApp.getService().getUrl()` が返すURLは、呼ばれた文脈で変わる。
+ *   Webアプリのリクエスト中（doGet）… `/exec`（デプロイURL。匿名で開ける）
+ *   スクリプトエディタからの実行     … `/dev` （開発用テストURL。**Googleログイン必須**）
+ * `/dev` と `/exec` はIDそのものが違う（前者はスクリプトID、後者はデプロイID）ため、
+ * 文字列を置換して `/exec` を作ることはできない。そこで doGet で得た `/exec` を
+ * `_config.web_app_url` に控えておき、エディタからでも配布用URLを組み立てられるようにする。
  */
 function webAppUrl_() {
+  const saved = getConfigValue_(CONFIG_KEY.WEB_APP_URL, '');
+  // 保存済みの値も通す。ドメイン付きで控えてしまった `_config` を書き換えずに直せる
+  if (saved) return normalizeWebAppUrl_(saved);
+  return serviceUrl_();
+}
+
+/** `ScriptApp.getService().getUrl()` の値。取得できなければ空文字 */
+function serviceUrl_() {
   try {
-    return ScriptApp.getService().getUrl() || '';
+    return normalizeWebAppUrl_(ScriptApp.getService().getUrl() || '');
   } catch (e) {
     return '';
+  }
+}
+
+/**
+ * ウェブアプリURLを、匿名で開ける形に直す。
+ *
+ * 【なぜ必要か】
+ * Google Workspace のアカウントでスクリプトを所有していると、
+ * `ScriptApp.getService().getUrl()` は**ドメイン限定の形**を返す。
+ *
+ *   https://script.google.com/a/example.com/macros/s/<ID>/exec
+ *   https://script.google.com/a/macros/example.com/s/<ID>/exec  ← 古い形
+ *
+ * これは「そのドメインのアカウントでログイン済み」であることを前提としたURLで、
+ * 未ログインで開くとGoogle側のアカウント判定に入り、**`?t=` が doGet まで届かない**。
+ * その結果「このURLでは開けません」になる。ドメイン部分を落とした
+ *
+ *   https://script.google.com/macros/s/<ID>/exec
+ *
+ * であれば匿名で開ける。デプロイID（`/s/<ID>/`）は同じものなので、組み替えて良い。
+ */
+function normalizeWebAppUrl_(url) {
+  const clean = trimStr_(url);
+  if (!clean) return '';
+  // ドメインが入る位置は形式によって違うため、`/s/<ID>/exec|dev` だけを取り出して組み直す
+  const m = clean.match(/^https:\/\/script\.google\.com\/.*\/s\/([^/?#]+)\/(exec|dev)\b/);
+  if (!m) return clean;
+  return 'https://script.google.com/macros/s/' + m[1] + '/' + m[2];
+}
+
+/** 配布して良いURL（`/exec`）か。`/dev` は編集権限が要るので配れない */
+function isDeployedUrl_(url) {
+  return /\/exec$/.test(trimStr_(url));
+}
+
+/**
+ * doGet の中から呼ぶ。デプロイURL（`/exec`）を控えていなければ控える。
+ *
+ * 未設定のときだけ書き込む。デプロイを作り直してURLが変わったときは
+ * setWebAppUrl() で明示的に入れ替える（アクセスのたびに書き換わると、
+ * 古いデプロイを開いた人が新しいURLを巻き戻してしまうため）。
+ */
+function rememberWebAppUrl_() {
+  try {
+    if (getConfigValue_(CONFIG_KEY.WEB_APP_URL, '')) return;
+    const url = serviceUrl_();
+    if (!isDeployedUrl_(url)) return;
+    setConfigValue_(CONFIG_KEY.WEB_APP_URL, url);
+  } catch (e) {
+    // URLを控えられなくても画面の表示は続ける
+    console.error('rememberWebAppUrl_: ' + e);
   }
 }
 

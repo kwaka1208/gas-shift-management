@@ -191,6 +191,7 @@
     }).join('');
 
     $('board').innerHTML =
+      renderOrphanWarning() +
       '<div class="board">' +
         '<div class="board__scroll">' +
           '<div class="board__inner" style="--hours:' + (total / 60) + '">' +
@@ -209,7 +210,8 @@
       タップしたときに枠の作成画面が開いてしまう。
     */
     if (state.adminMode) {
-      $('board').querySelectorAll('.board__lanes').forEach(function (el) {
+      // --assignable が付いたレーンだけ。places に無い場所のレーンには枠を作らせない
+      $('board').querySelectorAll('.board__lanes--assignable').forEach(function (el) {
         el.addEventListener('click', onLanesClickAssign);
       });
       $('board').querySelectorAll('.slot--assignable').forEach(function (el) {
@@ -250,7 +252,45 @@
   function visiblePlaces() {
     const used = {};
     state.slots.forEach(function (s) { used[s.place_id] = true; });
-    return state.places.filter(function (p) { return p.active || used[p.id]; });
+    const list = state.places.filter(function (p) { return p.active || used[p.id]; });
+
+    /*
+      places から行が消された場所を指す枠は、どのレーンにも入らず**画面から消える**。
+      見えないまま残ると気づけないうえ、保存はその日の枠を丸ごと送る仕組みなので、
+      1本あるだけで編集が詰まる。専用のレーンに出して、画面から直せるようにする。
+    */
+    orphanPlaceIds().forEach(function (id) {
+      list.push({ id: id, name: '(不明な場所)', active: false, missing: true });
+    });
+    return list;
+  }
+
+  /**
+   * places に無い場所を指す枠がある、という注意書き。
+   *
+   * 管理モードのときだけ出す。閲覧者に見せても直しようがなく、不安にさせるだけ。
+   */
+  function renderOrphanWarning() {
+    if (!state.adminMode) return '';
+    const ids = orphanPlaceIds();
+    if (ids.length === 0) return '';
+    return '<p class="warnLine">places シートに無い場所を指す枠があります' +
+      '（place_id: ' + ids.map(esc).join(' / ') + '）。' +
+      '「(不明な場所)」の行に出しています。枠をタップして場所を選び直すか、削除してください。</p>';
+  }
+
+  /** その日の枠が指しているのに、places に無い place_id */
+  function orphanPlaceIds() {
+    const known = {};
+    state.places.forEach(function (p) { known[p.id] = true; });
+    const seen = {};
+    const out = [];
+    state.slots.forEach(function (s) {
+      if (known[s.place_id] || seen[s.place_id]) return;
+      seen[s.place_id] = true;
+      out.push(s.place_id);
+    });
+    return out;
   }
 
   function renderTicks(dayStart, dayEnd, total) {
@@ -530,13 +570,15 @@
       return renderSlot(item.slot, item.lane, dayStart, total);
     }).join('');
 
-    // 空いているところをタップすると、人を選んで枠を作れる
-    const assignable = state.adminMode;
+    // 空いているところをタップすると、人を選んで枠を作れる。
+    // ただし places に無い場所には作らせない（作れば孤児の枠が増えるだけ）
+    const assignable = state.adminMode && !place.missing;
 
     return '<div class="board__row">' +
       '<div class="board__place' + (place.active ? '' : ' board__place--off') + '">' +
         esc(place.name) +
-        (place.active ? '' : '<small>（廃止）</small>') +
+        (place.missing ? '<small>（places にありません）</small>'
+          : (place.active ? '' : '<small>（廃止）</small>')) +
         (outCount > 0 ? '<small>表示範囲外 ' + outCount + '件</small>' : '') +
       '</div>' +
       '<div class="board__lanes' + (assignable ? ' board__lanes--assignable' : '') + '"' +
@@ -645,7 +687,17 @@
   const readTime = App.readTimeFields;
 
   function placeOptions(selected) {
-    return state.places.filter(function (p) { return p.active || p.id === selected; })
+    /*
+      places に無い場所を指す枠を開いたとき、選択肢が無いと**先頭の場所が選ばれた状態**に
+      なり、保存すると黙って場所が変わってしまう。今の値をそのまま選択肢に出して、
+      選び直すか削除するかを操作者に決めさせる。
+    */
+    const known = state.places.some(function (p) { return p.id === selected; });
+    const head = (selected && !known)
+      ? '<option value="' + esc(selected) + '" selected>(不明な場所)</option>'
+      : '';
+
+    return head + state.places.filter(function (p) { return p.active || p.id === selected; })
       .map(function (p) {
         return '<option value="' + esc(p.id) + '"' + (p.id === selected ? ' selected' : '') + '>' +
           esc(p.name) + (p.active ? '' : '（廃止）') + '</option>';

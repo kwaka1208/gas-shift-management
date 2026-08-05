@@ -148,6 +148,33 @@ function showViewUrl() {
 }
 
 /**
+ * 配布用のウェブアプリURL（`/exec`）を登録する。
+ *
+ * ふだんは doGet が自動で控えるため、実行する必要は無い。
+ * デプロイを作り直してURLが変わったときと、一度も公開URLで開いていないうちに
+ * URLを知りたいときだけ、デプロイ画面のURLをそのまま渡して実行する。
+ *
+ *   setWebAppUrl('https://script.google.com/macros/s/AKfycb.../exec')
+ */
+function setWebAppUrl(url) {
+  requireOwner_();
+  // ドメイン限定の形（/a/example.com/macros/...）で渡されても匿名で開ける形に直す
+  const clean = normalizeWebAppUrl_(trimStr_(url).replace(/[?#].*$/, ''));
+  if (!isDeployedUrl_(clean)) {
+    console.log('末尾が /exec のURLを渡してください。渡された値: ' + trimStr_(url));
+    console.log('スクリプトエディタの「デプロイ」→「デプロイを管理」に出ている');
+    console.log('ウェブアプリのURLです（/dev で終わるものは開発用で、配布できません）。');
+    return '';
+  }
+  setConfigValue_(CONFIG_KEY.WEB_APP_URL, clean);
+  console.log('配布用URLを登録しました: ' + clean);
+  console.log('');
+  const token = getConfigValue_(CONFIG_KEY.VIEW_TOKEN, '');
+  if (token) printUrls_(token);
+  return clean;
+}
+
+/**
  * 用途ごとのURLを並べて出す。
  * どれを誰に配るのかを取り違えると事故になるため、必ずセットで表示する。
  */
@@ -159,4 +186,26 @@ function printUrls_(token) {
   console.log('閲覧トークン: ' + token);
   console.log('※ 管理用URLは view=admin を足しただけです。閲覧用URLを知っている人は');
   console.log('   管理用URLも作れます。**保護ではなく、誤操作を防ぐための画面の分離です。**');
+  warnIfNotDeployedUrl_();
+}
+
+/**
+ * 上に出したURLが配布できないもの（`/dev`）だったら警告する。
+ *
+ * エディタから実行すると `/dev`（開発用テストURL）しか取れない。これは
+ * **Googleアカウントでのログインが必須**で、ボランティアには配れない。
+ */
+function warnIfNotDeployedUrl_() {
+  const url = webAppUrl_();
+  if (isDeployedUrl_(url)) return;
+  console.log('');
+  console.log('⚠ 上のURLは配布できません。' + (url ? '（' + url + '）' : ''));
+  if (/\/dev$/.test(url)) {
+    console.log('  /dev は開発用のテストURLで、開くとGoogleへのログインを求められます。');
+  } else {
+    console.log('  ウェブアプリとしてデプロイされていない可能性があります。');
+  }
+  console.log('  対処: デプロイ画面のウェブアプリURL（/exec で終わるもの）をコピーし、');
+  console.log('        setWebAppUrl(\'https://script.google.com/macros/s/.../exec\') を実行してください。');
+  console.log('  ※ 一度その公開URLでアプリを開けば、以降は自動で控えます。');
 }

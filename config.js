@@ -131,7 +131,7 @@ const PERSON_TYPE = {
 /**
  * `_config` の既定値。
  * setup() が投入する。既に値がある場合は上書きしない。
- * view_token はここに書かず、動的に生成する。
+ * view_token / web_app_url はここに書かず、動的に決まる。
  */
 const CONFIG_DEFAULTS = {
   day_start: '10:00',
@@ -150,6 +150,7 @@ const CONFIG_DEFAULTS = {
 /** `_config` のキー名 */
 const CONFIG_KEY = {
   VIEW_TOKEN: 'view_token',
+  WEB_APP_URL: 'web_app_url',
   DAY_START: 'day_start',
   DAY_END: 'day_end',
   SLOT_UNIT_MINUTES: 'slot_unit_minutes',

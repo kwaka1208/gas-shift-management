@@ -32,6 +32,13 @@ function doGet(e) {
   const token = trimStr_(params.t);
   const view = trimStr_(params.view) || DEFAULT_VIEW;
 
+  // 配布用URL（/exec）を控える。**トークン検証より前に置くこと。**
+  // 正しい /exec を取れるのは doGet の中だけで（service_auth.js webAppUrl_）、
+  // ここに置けば「デプロイ画面のURLを素で開く」だけで記録できる。検証の後ろに
+  // 置くと ?t=… 付きの正しいURLを既に持っている人しか記録できず、意味を成さない。
+  // 書き込むのは未設定のとき1回だけ。URLパラメータなど外部の入力は一切保存しない
+  rememberWebAppUrl_();
+
   // setup() 未実行だとシートが無く、トークン検証の中で例外になる。
   // 生のエラー画面を見せず、何をすればよいかを伝える
   let valid = false;

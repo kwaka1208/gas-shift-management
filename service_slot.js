@@ -120,7 +120,7 @@ function saveSlotsData_(date, slots, operator) {
       errors.push(label + ': 存在しない枠です（他の端末で削除された可能性があります）。');
       return;
     }
-    const row = validateSlotInput_(s, date, placeById, unit, label, errors);
+    const row = validateSlotInput_(s, date, placeById, unit, label, errors, byId.get(id) || null);
     if (row) {
       row.id = id;
       cleaned.push(row);
@@ -175,17 +175,22 @@ function saveSlotsData_(date, slots, operator) {
  *
  * クライアント側でも同じ検証をするが、**サーバー側の検証が本体**（gas.md 5.3）。
  * 匿名アクセス可のデプロイであり、クライアントの検証は迂回できる。
+ *
+ * @param {Object|null} current 既存行（新規なら null）。場所の検証を、その枠を実際に
+ *                              変更しようとしている場合だけに絞るために使う
  */
-function validateSlotInput_(s, date, placeById, unit, label, errors) {
+function validateSlotInput_(s, date, placeById, unit, label, errors, current) {
   let bad = false;
 
   const placeId = trimStr_(s.place_id);
   if (!placeId) {
     errors.push(label + ': 場所を選んでください。');
     bad = true;
-  } else if (!placeById.has(placeId)) {
-    // 場所の行が消された枠は配置表に描かれないため、画面から直せない。
-    // どの id を探せばよいかを出して、シートで追えるようにする
+  } else if (!placeById.has(placeId) && (!current || current.place_id !== placeId)) {
+    // 弾くのは新規作成と place_id の変更だけ。
+    // **既存の枠を、場所を変えずに送り直すだけなら通す。** 保存はその日の枠を丸ごと
+    // 送る仕組みなので、places の行が消えた枠が1本あるだけで、その日の枠が
+    // 一切編集できなくなる（その枠は配置表に描かれず、画面からは気づけない）
     errors.push(label + ': この枠が指している場所が places シートにありません（place_id: ' +
       placeId + '）。places シートを確認してください。');
     bad = true;
@@ -301,7 +306,7 @@ function generateSlotsData_(templateName, fromDate, toDate, operator) {
       return;
     }
     // 日付は展開時に決まるので、検証には便宜上どの日を渡してもよい
-    const row = validateSlotInput_(t, dates[0], placeById, unit, label, errors);
+    const row = validateSlotInput_(t, dates[0], placeById, unit, label, errors, null);
     if (row) valid.push({ dow: dow, row: row });
   });
   if (errors.length > 0) throw new Error(errors.join('\n'));

@@ -80,7 +80,7 @@ function assignToNewSlotData_(input, operator) {
     required_count: getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_REQUIRED, 1),
     staff_required: payload.staff_required,
     note: payload.note
-  }, date, placeById, unit, '枠', errors);
+  }, date, placeById, unit, '枠', errors, null); // 新規作成なので場所の検証は厳格でよい
   if (errors.length > 0) throw new Error(errors.join('\n'));
 
   const found = findOrCreateSlot_(cleaned, operator);
