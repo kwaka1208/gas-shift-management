@@ -25,7 +25,7 @@
     date: BOOT.date,
     config: null,
     places: [],
-    slots: [],
+    // 1件が「誰がどこにいつ入るか」を丸ごと持つ。**枠という概念は無い**（design.md 3）
     assignments: [],
     people: [],
     availability: [],
@@ -115,7 +115,6 @@
   */
   function applyDayBoard(data) {
     state.date = data.date;
-    state.slots = data.slots;
     state.assignments = data.assignments || [];
     state.people = data.people || [];
     state.availability = data.availability || [];
@@ -163,8 +162,8 @@
   /**
    * 配置表を描く。
    *
-   * **10分刻みのセルを敷き詰めない。** 目盛りは背景で描き、枠は開始・終了から
-   * 幅を計算して絶対配置する（roadmap Phase 1 受け入れ条件）。
+   * **10分刻みのセルを敷き詰めない。** 目盛りは背景で描き、割り当ての帯は
+   * 開始・終了から幅を計算して絶対配置する（roadmap Phase 1 受け入れ条件）。
    */
   function renderBoard() {
     const cfg = state.config;
@@ -184,13 +183,13 @@
       return;
     }
 
-    const slotsByPlace = {};
-    state.slots.forEach(function (s) {
-      (slotsByPlace[s.place_id] = slotsByPlace[s.place_id] || []).push(s);
+    const byPlace = {};
+    state.assignments.forEach(function (a) {
+      (byPlace[a.place_id] = byPlace[a.place_id] || []).push(a);
     });
 
     const rows = places.map(function (p) {
-      return renderPlaceRow(p, slotsByPlace[p.id] || [], dayStart, total);
+      return renderPlaceRow(p, byPlace[p.id] || [], dayStart, total);
     }).join('');
 
     $('board').innerHTML =
@@ -210,40 +209,32 @@
     /*
       **必ず #board の中だけを探すこと。** 人ごとのセクションも同じ骨組み
       （.board__lanes）を使っているため、document 全体から拾うと、人の行を
-      タップしたときに枠の作成画面が開いてしまう。
+      タップしたときに人を入れる画面が開いてしまう。
     */
     if (state.adminMode) {
-      // --assignable が付いたレーンだけ。places に無い場所のレーンには枠を作らせない
+      // --assignable が付いたレーンだけ。places に無い場所には入れさせない
       $('board').querySelectorAll('.board__lanes--assignable').forEach(function (el) {
         el.addEventListener('click', onLanesClickAssign);
       });
       $('board').querySelectorAll('.slot--assignable').forEach(function (el) {
         el.addEventListener('click', function (e) {
           e.stopPropagation();
-          openAssignPanel(el.dataset.id);
+          openAssignmentPanel(el.dataset.id);
         });
       });
     }
   }
 
-  /*
-    かつてここには isVirtualId / realSlots / presetOfEl があった。
-
-    枠が1つも無い場所に破線の「既定の枠」を仮想的に出す機能を廃止したため、
-    **state.slots はシートに実在する枠だけになった。** 仮想の枠を選り分ける必要は無い。
-    saveSlots へは state.slots をそのまま送ってよい。
-  */
-
-  /** 表示する場所。廃止済みでも、その日の枠が残っていれば表示する */
+  /** 表示する場所。廃止済みでも、その日の割り当てが残っていれば表示する */
   function visiblePlaces() {
     const used = {};
-    state.slots.forEach(function (s) { used[s.place_id] = true; });
+    state.assignments.forEach(function (a) { used[a.place_id] = true; });
     const list = state.places.filter(function (p) { return p.active || used[p.id]; });
 
     /*
-      places から行が消された場所を指す枠は、どのレーンにも入らず**画面から消える**。
-      見えないまま残ると気づけないうえ、保存はその日の枠を丸ごと送る仕組みなので、
-      1本あるだけで編集が詰まる。専用のレーンに出して、画面から直せるようにする。
+      places から行が消された場所を指す割り当ては、どのレーンにも入らず**画面から消える**。
+      見えないまま残ると気づけず、その人を外すことも直すこともできない。
+      専用のレーンに出して、画面から直せるようにする。
     */
     orphanPlaceIds().forEach(function (id) {
       list.push({ id: id, name: '(不明な場所)', active: false, missing: true });
@@ -252,7 +243,7 @@
   }
 
   /**
-   * places に無い場所を指す枠がある、という注意書き。
+   * places に無い場所を指す割り当てがある、という注意書き。
    *
    * 管理モードのときだけ出す。閲覧者に見せても直しようがなく、不安にさせるだけ。
    */
@@ -260,21 +251,21 @@
     if (!state.adminMode) return '';
     const ids = orphanPlaceIds();
     if (ids.length === 0) return '';
-    return '<p class="warnLine">places シートに無い場所を指す枠があります' +
+    return '<p class="warnLine">places シートに無い場所を指す割り当てがあります' +
       '（place_id: ' + ids.map(esc).join(' / ') + '）。' +
-      '「(不明な場所)」の行に出しています。枠をタップして場所を選び直すか、削除してください。</p>';
+      '「(不明な場所)」の行に出しています。タップして場所を選び直すか、解除してください。</p>';
   }
 
-  /** その日の枠が指しているのに、places に無い place_id */
+  /** その日の割り当てが指しているのに、places に無い place_id */
   function orphanPlaceIds() {
     const known = {};
     state.places.forEach(function (p) { known[p.id] = true; });
     const seen = {};
     const out = [];
-    state.slots.forEach(function (s) {
-      if (known[s.place_id] || seen[s.place_id]) return;
-      seen[s.place_id] = true;
-      out.push(s.place_id);
+    state.assignments.forEach(function (a) {
+      if (known[a.place_id] || seen[a.place_id]) return;
+      seen[a.place_id] = true;
+      out.push(a.place_id);
     });
     return out;
   }
@@ -296,7 +287,7 @@
 
   /*
     配置表と同じデータを「人ごと」に並べ替えて見せる。
-    上の表で枠の埋まり具合を見て、下の表で誰がまだ空いているかを探す、という使い方。
+    上の表で場所の埋まり具合を見て、下の表で誰がまだ空いているかを探す、という使い方。
 
     **サーバーへは問い合わせない。** getDayBoard が返した同じ state から組み立てる。
   */
@@ -323,14 +314,12 @@
     });
 
     state.assignments.forEach(function (a) {
-      const s = slotOf(a.slot_id);
-      if (!s) return;
       ensure(a.person_id).busy.push({
         assignmentId: a.id,
-        start: toMin(s.start_time),
-        end: toMin(s.end_time),
-        place: placeNameOf(s.place_id),
-        time: tl(s.start_time) + '–' + tl(s.end_time)
+        start: toMin(a.start_time),
+        end: toMin(a.end_time),
+        place: placeNameOf(a.place_id),
+        time: tl(a.start_time) + '–' + tl(a.end_time)
       });
     });
 
@@ -507,46 +496,31 @@
   /**
    * 人ごとの一覧からの解除。
    *
-   * 割り当てパネルの解除と違い、**先に確認を挟む。**
-   * 帯は小さく、指が触れただけで人が消えると気付けないため。
+   * **先に確認を挟む。** 帯は小さく、指が触れただけで人が消えると気付けないため。
+   * （場所ごとの帯をタップしたときは編集パネルが開くので、誤操作にならない）
    */
   function openUnassignModal(assignmentId, who, what) {
     openModal('割り当てを解除',
       '<p class="formError" hidden></p>' +
       '<p class="panelHead">' + esc(who) + 'さん</p>' +
       '<p>' + esc(what) + '</p>' +
-      '<p class="hint">枠は残ります。この人だけを外します。</p>' +
+      '<p class="hint">この割り当てを取り消します。申告した時間帯は残ります。</p>' +
       '<div class="formActions"><div class="formActions__spacer"></div>' +
         '<button type="button" class="btn" data-close="1">やめる</button>' +
         '<button type="button" class="btn btn--danger" id="u_run">解除する</button>' +
       '</div>');
 
-    $('u_run').addEventListener('click', function () {
-      if (state.busy) return;
-      setBusy(true);
-      call('unassign', state.token, assignmentId)
-        .then(function () {
-          state.assignments = state.assignments.filter(function (a) { return a.id !== assignmentId; });
-          closeModal();
-          renderBoard();
-          renderPeople();
-          toast('解除しました');
-        })
-        .catch(function (e) {
-          showFormError(e.message);
-        })
-        .then(function () { setBusy(false); });
-    });
+    $('u_run').addEventListener('click', function () { doUnassign(assignmentId); });
   }
 
-  function renderPlaceRow(place, slots, dayStart, total) {
+  function renderPlaceRow(place, rows, dayStart, total) {
     const dayEnd = dayStart + total;
     const inRange = [];
     let outCount = 0;
 
-    slots.forEach(function (s) {
-      if (toMin(s.end_time) <= dayStart || toMin(s.start_time) >= dayEnd) outCount++;
-      else inRange.push(s);
+    rows.forEach(function (a) {
+      if (toMin(a.end_time) <= dayStart || toMin(a.start_time) >= dayEnd) outCount++;
+      else inRange.push(a);
     });
 
     const lanes = assignLanes(inRange);
@@ -554,11 +528,11 @@
     const minHeight = 'calc(.5rem + ' + laneCount + ' * var(--block-h) + ' + (laneCount - 1) + ' * .25rem)';
 
     const blocks = lanes.items.map(function (item) {
-      return renderSlot(item.slot, item.lane, dayStart, total);
+      return renderAssignmentBlock(item.row, item.lane, dayStart, total);
     }).join('');
 
-    // 空いているところをタップすると、人を選んで枠を作れる。
-    // ただし places に無い場所には作らせない（作れば孤児の枠が増えるだけ）
+    // 空いているところをタップすると人を入れられる。
+    // ただし places に無い場所には入れさせない（行き場の無い割り当てが増えるだけ）
     const assignable = state.adminMode && !place.missing;
 
     return '<div class="board__row">' +
@@ -576,18 +550,21 @@
   }
 
   /**
-   * 重なり合う枠を段に振り分ける。
-   * 同じ場所に時間の重なる枠を作れる仕様のため、重ねずに読めるようにする。
+   * 重なり合う割り当てを段に振り分ける。
+   *
+   * **1つの場所の同じ時間に入るのは1人まで**なので、本来ここは重ならない。
+   * それでも段組みを残しているのは、シートを直接編集して重なりを作れてしまうため。
+   * **重なりを画面から隠さない。** 隠すと、なぜ登録できないのかが分からなくなる。
    */
-  function assignLanes(slots) {
-    const sorted = slots.slice().sort(function (a, b) {
+  function assignLanes(rows) {
+    const sorted = rows.slice().sort(function (a, b) {
       if (a.start_time !== b.start_time) return a.start_time < b.start_time ? -1 : 1;
       return a.end_time < b.end_time ? -1 : 1;
     });
     const laneEnds = [];
-    const items = sorted.map(function (s) {
-      const start = toMin(s.start_time);
-      const end = toMin(s.end_time);
+    const items = sorted.map(function (r) {
+      const start = toMin(r.start_time);
+      const end = toMin(r.end_time);
       let lane = laneEnds.findIndex(function (e) { return e <= start; });
       if (lane === -1) {
         lane = laneEnds.length;
@@ -595,55 +572,46 @@
       } else {
         laneEnds[lane] = end;
       }
-      return { slot: s, lane: lane };
+      return { row: r, lane: lane };
     });
     return { items: items, count: laneEnds.length };
   }
 
-  function renderSlot(slot, lane, dayStart, total) {
+  /** 割り当て1件のブロック。**枠は無い。この帯そのものが1件の割り当て** */
+  function renderAssignmentBlock(row, lane, dayStart, total) {
     const dayEnd = dayStart + total;
-    const start = Math.max(toMin(slot.start_time), dayStart);
-    const end = Math.min(toMin(slot.end_time), dayEnd);
+    const start = Math.max(toMin(row.start_time), dayStart);
+    const end = Math.min(toMin(row.end_time), dayEnd);
     const left = (start - dayStart) / total * 100;
     const width = (end - start) / total * 100;
     const top = 'calc(.25rem + ' + lane + ' * (var(--block-h) + .25rem))';
 
-    // 管理URLでは枠をタップすると割り当てパネルが開く
-    const assignable = state.adminMode;
-    const tag = assignable ? 'button' : 'div';
+    // 管理URLではタップすると編集パネルが開く
+    const editable = state.adminMode;
+    const tag = editable ? 'button' : 'div';
 
-    const list = assignmentsOfSlot(slot.id);
-    // **1つの枠に入るのは1人まで**（design.md 6.6）。人数ではなく埋まったかどうかを見せる
-    const meta = list.length === 0 ? '未割当' : '割当済み';
     /*
-      名前に続けて性別・年齢と職員の印を括弧でまとめる（例: 「鈴木 花子（女42）」
-      「伊藤 誠（男38・職）」）。帯は1行で `…` に切られるため、括弧の中身は最小限にする。
-      管理URL以外では性別・年齢が空になり、従来どおり「（職）」だけが付く。
+      名前に性別・年齢と職員の印を括弧で添える（例:「鈴木 花子（女42）」）。
+      帯は1行で `…` に切られるため、括弧の中身は短縮形にする（4.1.2）。
     */
-    const names = list.map(function (a) {
-      const tags = [personMetaShort(personOf(a.person_id)), isStaff(a.person_id) ? '職' : '']
-        .filter(function (t) { return t; });
-      return personName(a.person_id) + (tags.length > 0 ? '（' + tags.join('・') + '）' : '');
-    }).join('、');
+    const tags = [personMetaShort(personOf(row.person_id)), isStaff(row.person_id) ? '職' : '']
+      .filter(function (t) { return t; });
+    const who = personName(row.person_id) +
+      (tags.length > 0 ? '（' + tags.join('・') + '）' : '');
 
-    return '<' + tag + (assignable ? ' type="button"' : '') +
-      ' class="slot' + (assignable ? ' slot--assignable' : '') +
-        (list.length === 0 ? ' slot--empty' : '') + '"' +
-      ' data-id="' + esc(slot.id) + '"' +
-      ' data-place="' + esc(slot.place_id) + '"' +
-      ' data-start="' + esc(slot.start_time) + '" data-end="' + esc(slot.end_time) + '"' +
+    return '<' + tag + (editable ? ' type="button"' : '') +
+      ' class="slot' + (editable ? ' slot--assignable' : '') + '"' +
+      ' data-id="' + esc(row.id) + '"' +
       ' style="left:' + left + '%;width:' + width + '%;top:' + top + '">' +
-      '<span class="slot__time">' + esc(tl(slot.start_time)) + '–' + esc(tl(slot.end_time)) + '</span>' +
-      '<span class="slot__meta">' + esc(meta) +
-        (slot.note ? ' <span class="slot__note">' + esc(slot.note) + '</span>' : '') +
-      '</span>' +
-      (names ? '<span class="slot__names">' + esc(names) + '</span>' : '') +
+      '<span class="slot__time">' + esc(tl(row.start_time)) + '–' + esc(tl(row.end_time)) + '</span>' +
+      '<span class="slot__names">' + esc(who) + '</span>' +
+      (row.note ? '<span class="slot__note">' + esc(row.note) + '</span>' : '') +
     '</' + tag + '>';
   }
 
   /**
-   * 空いているところをタップしたら、そこに人を入れる（割り当てモード）。
-   * 枠はこの操作の中で作られる。先に枠を用意しておく必要はない。
+   * 空いているところをタップしたら、そこに人を入れる。
+   * **これが唯一の割り当て経路。** 先に何かを用意しておく必要はない。
    */
   function onLanesClickAssign(e) {
     const preset = presetFromClick(e);
@@ -672,7 +640,7 @@
     };
   }
 
-  // ------------------------------------------------------- 枠の編集モーダル
+  // ------------------------------------------------------------ 入力の部品
 
   /** 時刻は時・分の直接入力。表示時間帯の外の時刻も入れられる */
   const timeFields = App.timeFields;
@@ -680,9 +648,9 @@
 
   function placeOptions(selected) {
     /*
-      places に無い場所を指す枠を開いたとき、選択肢が無いと**先頭の場所が選ばれた状態**に
+      places に無い場所の割り当てを開いたとき、選択肢が無いと**先頭の場所が選ばれた状態**に
       なり、保存すると黙って場所が変わってしまう。今の値をそのまま選択肢に出して、
-      選び直すか削除するかを操作者に決めさせる。
+      選び直すか解除するかを操作者に決めさせる。
     */
     const known = state.places.some(function (p) { return p.id === selected; });
     const head = (selected && !known)
@@ -694,27 +662,6 @@
         return '<option value="' + esc(p.id) + '"' + (p.id === selected ? ' selected' : '') + '>' +
           esc(p.name) + (p.active ? '' : '（廃止）') + '</option>';
       }).join('');
-  }
-
-  /**
-   * その日の枠を丸ごと保存する。
-   * 割り当てのある枠を消そうとした場合など、サーバー側で拒否されることがあるため、
-   * 楽観的更新はせず、結果を受け取ってから描き直す。
-   */
-  function submitSlots(slots, successMessage) {
-    if (state.busy) return;
-    setBusy(true);
-    call('saveSlots', state.token, state.date, slots)
-      .then(function (data) {
-        state.slots = data.slots;
-        closeModal();
-        render();
-        toast(successMessage);
-      })
-      .catch(function (e) {
-        showFormError(e.message);
-      })
-      .then(function () { setBusy(false); });
   }
 
   // ------------------------------------------------------- 場所の管理
@@ -781,8 +728,8 @@
     問い合わせない（CLAUDE.md 開発ルール）。ただし保存時はサーバー側が同じ検証をやり直す。
   */
 
-  function assignmentsOfSlot(slotId) {
-    return state.assignments.filter(function (a) { return a.slot_id === slotId; });
+  function assignmentOf(id) {
+    return state.assignments.filter(function (a) { return a.id === id; })[0] || null;
   }
 
   function personOf(personId) {
@@ -811,7 +758,7 @@
   }
 
   /**
-   * 枠の帯向けの短縮形（例: 「女42」）。無ければ空文字。
+   * 帯向けの短縮形（例: 「女42」）。無ければ空文字。
    * 帯は1行で、はみ出すと `…` で切られるため、区切り文字も「歳」も入れずに詰める。
    */
   function personMetaShort(person) {
@@ -839,10 +786,6 @@
     return !!p && p.type === 'staff';
   }
 
-  function slotOf(slotId) {
-    return state.slots.filter(function (s) { return s.id === slotId; })[0] || null;
-  }
-
   function placeNameOf(placeId) {
     const p = state.places.filter(function (x) { return x.id === placeId; })[0];
     return p ? p.name : '(不明な場所)';
@@ -867,72 +810,12 @@
   function loadByPerson() {
     const map = {};
     state.assignments.forEach(function (a) {
-      const s = slotOf(a.slot_id);
-      if (!s) return;
-      map[a.person_id] = (map[a.person_id] || 0) + (toMin(s.end_time) - toMin(s.start_time));
+      map[a.person_id] = (map[a.person_id] || 0) + (toMin(a.end_time) - toMin(a.start_time));
     });
     return map;
   }
 
-  /**
-   * 枠に対する候補者を求める（design.md 6.3）。
-   *
-   * **人単位に集約してから判定する。** 1人が同じ日に複数の可用性行を持てるため、
-   * 行単位で判定すると同じ人が完全候補と部分候補の両方に出る。
-   */
-  function candidatesFor(slot) {
-    const start = toMin(slot.start_time);
-    const end = toMin(slot.end_time);
-    const avail = availabilityByPerson();
-    const load = loadByPerson();
-
-    const assignedHere = {};
-    assignmentsOfSlot(slot.id).forEach(function (a) { assignedHere[a.person_id] = true; });
-
-    // 同じ時間に別の場所へ入っている人は候補に出さない（ダブルブッキング防止）
-    const busy = {};
-    state.assignments.forEach(function (a) {
-      if (a.slot_id === slot.id) return;
-      const s = slotOf(a.slot_id);
-      if (!s) return;
-      if (overlapsRange(start, end, toMin(s.start_time), toMin(s.end_time))) busy[a.person_id] = true;
-    });
-
-    const full = [];
-    const partial = [];
-
-    state.people.forEach(function (p) {
-      if (p.merged_into) return;      // 名寄せ元は出さない（統合先が出る）
-      if (assignedHere[p.id]) return;
-      if (busy[p.id]) return;
-
-      const ranges = avail[p.id] || [];
-      const covering = ranges.some(function (r) { return r.start <= start && end <= r.end; });
-      const row = { person: p, load: load[p.id] || 0 };
-
-      if (covering) {
-        full.push(row);
-        return;
-      }
-      const touching = ranges.filter(function (r) { return overlapsRange(start, end, r.start, r.end); });
-      if (touching.length === 0) return;
-
-      // 枠のうち実際に入れる部分だけを示す
-      row.ranges = touching.map(function (r) {
-        return ml(Math.max(r.start, start)) + '–' + ml(Math.min(r.end, end));
-      }).join('、');
-      // 時間指定で入れるときの初期値（枠と可用性が重なっている部分）
-      row.preset_start = toHHMM(Math.max(touching[0].start, start));
-      row.preset_end = toHHMM(Math.min(touching[0].end, end));
-      partial.push(row);
-    });
-
-    full.sort(compareCandidates);
-    partial.sort(compareCandidates);
-    return { full: full, partial: partial };
-  }
-
-  /** ボランティアを先に、同種別では当日の割当が少ない順、次に かな／名前（design.md 6.3-5） */
+  /** ボランティアを先に、同種別では当日の割当が少ない順、次に かな／名前（design.md 6.3） */
   function compareCandidates(a, b) {
     const at = a.person.type === 'staff' ? 1 : 0;
     const bt = b.person.type === 'staff' ? 1 : 0;
@@ -943,169 +826,14 @@
     return String(ak).localeCompare(String(bk), 'ja');
   }
 
-  function openAssignPanel(slotId) {
-    if (!slotOf(slotId)) return;
-    renderAssignPanel(slotId);
-  }
-
-  /** パネルは割り当て・解除のたびに組み直す。状態を持たせず、毎回 state から描く */
-  /**
-   * 枠のパネル。**上に枠そのものの編集、下に人の出し入れ**を並べる。
-   *
-   * 枠をタップしたらまず「場所と時間を直せる」ことが分かるように、編集欄を先頭に置く。
-   * 人の追加・解除も同じパネルで完結させ、画面を行き来させない。
-   */
-  function renderAssignPanel(slotId) {
-    const slot = slotOf(slotId);
-    if (!slot) {
-      closeModal();
-      return;
-    }
-
-    const assigned = assignmentsOfSlot(slotId);
-    const cand = candidatesFor(slot);
-
-    // 割り当てのたびに組み直すため、そのままだと一覧の先頭へ戻ってしまう
-    const panelEl = document.querySelector('.modal__panel');
-    const keepScroll = ($('modal').hidden || !panelEl) ? 0 : panelEl.scrollTop;
-
-    openModal(placeNameOf(slot.place_id) + ' ' + tl(slot.start_time) + '–' + tl(slot.end_time),
-      '<p class="formError" hidden></p>' +
-      // --- 枠そのものの編集 ---
-      '<div class="field"><label for="f_place">場所</label>' +
-        '<select id="f_place">' + placeOptions(slot.place_id) + '</select></div>' +
-      '<div class="field field--row">' +
-        '<div><label>開始</label>' +
-          timeFields({ id: 'f_start', value: slot.start_time, label: '開始' }) + '</div>' +
-        '<div><label>終了</label>' +
-          timeFields({ id: 'f_end', value: slot.end_time, label: '終了' }) + '</div>' +
-      '</div>' +
-      '<div class="field"><label for="f_note">メモ（任意）</label>' +
-        '<input type="text" id="f_note" value="' + esc(slot.note) + '" maxlength="100"></div>' +
-      '<div class="slotEditActions">' +
-        '<button type="button" class="btn btn--danger" id="f_delete">この枠を削除</button>' +
-        '<button type="button" class="btn btn--primary" id="f_save">枠を保存</button>' +
-      '</div>' +
-      // --- 人の出し入れ ---
-      /*
-        **1つの枠に入るのは1人まで**（design.md 6.6）。
-        埋まっている枠では候補の一覧をそもそも出さない。押せない名前を並べても、
-        なぜ入らないのかが分からず、解除すればよいことにも気づけない。
-      */
-      assignedSectionHtml(assigned) +
-      (assigned.length > 0
-        ? '<p class="hint">1つの枠に入れるのは1人までです。別の人に替えるときは、' +
-          '上の「解除」を押してから選び直してください。同じ時間に複数人を置きたい場合は、' +
-          '場所を分けて登録してください。</p>'
-        : candidateSectionHtml(cand.full) + partialSectionHtml(cand.partial)) +
-      // 枠の時間とは違う時間で入れたいとき。指定した時間の枠が新しくできる
-      '<button type="button" class="btn btn--block btn--sub" id="a_time">時間を指定して入れる</button>' +
-      '<div class="formActions"><div class="formActions__spacer"></div>' +
-        '<button type="button" class="btn" data-close="1">閉じる</button></div>');
-
-    if (panelEl && keepScroll) panelEl.scrollTop = keepScroll;
-
-    // --- 枠の保存・削除 ---
-    $('f_save').addEventListener('click', function () {
-      const edited = {
-        id: slotId,
-        place_id: $('f_place').value,
-        start_time: readTime($('f_start')),
-        end_time: readTime($('f_end')),
-        // 人数は画面で扱わない（場所単位で管理する方針）。既存の値をそのまま残す
-        required_count: slot.required_count,
-        staff_required: slot.staff_required,
-        note: $('f_note').value
-      };
-      // クライアント側の検証は入力補助。判定はサーバー側が本体
-      if (!edited.start_time || !edited.end_time) {
-        showFormError('時刻を入力してください（時は0〜' + App.TIME_MAX_HOUR + '、分は0〜59）。');
-        return;
-      }
-      if (toMin(edited.start_time) >= toMin(edited.end_time)) {
-        showFormError('終了時刻は開始時刻より後にしてください。');
-        return;
-      }
-      const next = state.slots.filter(function (s) { return s.id !== slotId; }).concat([edited]);
-      submitSlots(next, '枠を保存しました');
-    });
-
-    $('f_delete').addEventListener('click', function () {
-      const next = state.slots.filter(function (s) { return s.id !== slotId; });
-      submitSlots(next, '枠を削除しました');
-    });
-
-    // --- 人の出し入れ ---
-    $('modalBody').querySelectorAll('[data-assign]').forEach(function (el) {
-      el.addEventListener('click', function () { doAssign(slotId, el.dataset.assign); });
-    });
-    $('modalBody').querySelectorAll('[data-unassign]').forEach(function (el) {
-      el.addEventListener('click', function () { doUnassign(slotId, el.dataset.unassign); });
-    });
-    // 部分可用の人は、枠全体ではなく「入れる時間だけ」の枠を作って入れる
-    $('modalBody').querySelectorAll('[data-pick]').forEach(function (el) {
-      el.addEventListener('click', function () {
-        openTimePickPanel(slot.place_id, el.dataset.pick, {
-          start_time: el.dataset.start,
-          end_time: el.dataset.end
-        }, function () { renderAssignPanel(slotId); });
-      });
-    });
-    $('a_time').addEventListener('click', function () {
-      openNewAssignPanel(slot.place_id, {
-        start_time: slot.start_time,
-        end_time: slot.end_time
-      }, function () { renderAssignPanel(slotId); });
-    });
-  }
-
-  function assignedSectionHtml(assigned) {
-    if (assigned.length === 0) {
-      return '<section class="assignSec"><h3>割り当て済み (0)</h3>' +
-        '<p class="empty empty--sm">まだ誰も割り当てられていません。</p></section>';
-    }
-    const rows = assigned.map(function (a) {
-      // 送信中の行（楽観的更新で先に置いたもの）はまだ解除できない
-      const pending = a.id.indexOf('tmp:') === 0;
-      const meta = personMeta(personOf(a.person_id));
-      return '<li class="pRow pRow--assigned">' +
-        '<span class="pName">' + esc(personName(a.person_id)) +
-          (meta ? '<small class="pMeta">' + esc(meta) + '</small>' : '') + '</span>' +
-        '<span class="pTag' + (isStaff(a.person_id) ? ' pTag--staff' : '') + '">' +
-          (isStaff(a.person_id) ? '職員' : 'ボランティア') + '</span>' +
-        (pending
-          ? '<span class="pPending">登録中…</span>'
-          : '<button type="button" class="btn btn--small btn--danger" data-unassign="' + esc(a.id) + '">解除</button>') +
-      '</li>';
-    }).join('');
-    return '<section class="assignSec"><h3>割り当て済み (' + assigned.length + ')</h3>' +
-      '<ul class="pList">' + rows + '</ul></section>';
-  }
-
-  function candidateSectionHtml(rows) {
-    if (rows.length === 0) {
-      return '<section class="assignSec"><h3>割り当て可能 (0)</h3>' +
-        '<p class="empty empty--sm">この時間に入れる人がいません。' +
-        '可用性の登録状況を確認してください。</p></section>';
-    }
-    return '<section class="assignSec"><h3>割り当て可能 (' + rows.length + ')</h3>' +
-      volunteerStaffHtml(rows, candidateRowHtml) +
-    '</section>';
-  }
-
-  /** 候補者1行。押すと枠の時間そのままで割り当てる */
-  function candidateRowHtml(row) {
-    return pickRowHtml('data-assign="' + esc(row.person.id) + '"',
-      row.person, '本日 ' + loadLabel(row.load));
-  }
-
-  /** 部分可用の1行。押すと「入れる時間だけ」の枠を作る画面へ進む */
-  function partialRowHtml(row) {
-    return pickRowHtml(
-      'data-pick="' + esc(row.person.id) + '"' +
-      ' data-start="' + esc(row.preset_start) + '"' +
-      ' data-end="' + esc(row.preset_end) + '"',
-      row.person, row.ranges + ' のみ');
+  /** ボランティアと職員に分けて並べる。ボランティア優先が画面から分かるようにする */
+  function volunteerStaffHtml(rows, rowFn) {
+    const volunteers = rows.filter(function (r) { return r.person.type !== 'staff'; });
+    const staff = rows.filter(function (r) { return r.person.type === 'staff'; });
+    return (volunteers.length > 0
+        ? '<h4>ボランティア</h4><ul class="pList">' + volunteers.map(rowFn).join('') + '</ul>' : '') +
+      (staff.length > 0
+        ? '<h4>職員</h4><ul class="pList">' + staff.map(rowFn).join('') + '</ul>' : '');
   }
 
   /**
@@ -1122,16 +850,6 @@
     '</button></li>';
   }
 
-  function partialSectionHtml(rows) {
-    if (rows.length === 0) return '';
-    // 控えめに（design.md 4.2）。既定は閉じておき、必要なときだけ開く
-    return '<details class="assignSec assignSec--sub">' +
-      '<summary>一部の時間のみ可用 (' + rows.length + ')</summary>' +
-      '<p class="hint">枠の一部しか入れない人です。選ぶと、その人が入れる時間の枠を作ります。</p>' +
-      '<ul class="pList">' + rows.map(partialRowHtml).join('') + '</ul>' +
-    '</details>';
-  }
-
   function loadLabel(minutes) {
     if (!minutes) return '割当なし';
     const h = Math.floor(minutes / 60);
@@ -1139,104 +857,150 @@
     return (h > 0 ? h + '時間' : '') + (m > 0 ? m + '分' : '');
   }
 
-  /*
-    割り当て・解除は楽観的更新（design.md 4.2）。
-    先に画面を書き換え、サーバーが拒否したら元に戻す。管理者は実質1人ずつという前提に立つ。
-  */
+  // ------------------------------------------- 割り当ての編集（既にある帯）
 
-  function doAssign(slotId, personId) {
-    if (state.busy) return;
-    const tempId = 'tmp:' + Date.now();
-    state.assignments = state.assignments.concat([{
-      id: tempId, slot_id: slotId, person_id: personId, assigned_by: ''
-    }]);
-    refreshAssignView(slotId);
+  /**
+   * 割り当てのパネル。**場所・時間・メモを直すか、解除するか**の2つだけ。
+   *
+   * かつてここは「枠のパネル」で、下半分に候補者の一覧が並んでいた。
+   * **枠と割り当てが1対1になったので、人を足すという操作そのものが無くなった。**
+   * 人を替えるときは解除してから入れ直す（`_log` に外れた記録を残すため）。
+   */
+  function openAssignmentPanel(assignmentId) {
+    const row = assignmentOf(assignmentId);
+    if (!row) {
+      closeModal();
+      return;
+    }
+    const person = personOf(row.person_id);
+    const meta = person ? personMeta(person) : '';
 
-    setBusy(true);
-    call('assign', state.token, slotId, personId)
-      .then(function (data) {
-        // サーバー側で名寄せが解決されることがあるので、行ごと置き換える
-        state.assignments = state.assignments.map(function (a) {
-          return a.id === tempId ? data.assignment : a;
-        });
-        refreshAssignView(slotId);
-      })
-      .catch(function (e) {
-        state.assignments = state.assignments.filter(function (a) { return a.id !== tempId; });
-        refreshAssignView(slotId);
-        toast(e.message, true);
-      })
-      .then(function () { setBusy(false); });
+    openModal(placeNameOf(row.place_id) + ' ' + tl(row.start_time) + '–' + tl(row.end_time),
+      '<p class="formError" hidden></p>' +
+      '<p class="panelHead">' + esc(personName(row.person_id)) +
+        (isStaff(row.person_id) ? '（職員）' : '') + '</p>' +
+      (meta ? '<p class="hint">' + esc(meta) + '</p>' : '') +
+      '<p class="hint">' + esc(availabilityLabel(row.person_id)) + '</p>' +
+      '<div class="field"><label for="f_place">場所</label>' +
+        '<select id="f_place">' + placeOptions(row.place_id) + '</select></div>' +
+      '<div class="field field--row">' +
+        '<div><label>開始</label>' +
+          timeFields({ id: 'f_start', value: row.start_time, label: '開始' }) + '</div>' +
+        '<div><label>終了</label>' +
+          timeFields({ id: 'f_end', value: row.end_time, label: '終了' }) + '</div>' +
+      '</div>' +
+      '<div class="field"><label for="f_note">メモ（任意）</label>' +
+        '<input type="text" id="f_note" value="' + esc(row.note || '') + '" maxlength="100"></div>' +
+      '<p class="warnLine" id="f_warn" hidden></p>' +
+      '<div class="formActions">' +
+        '<button type="button" class="btn btn--danger" id="f_unassign">この人を外す</button>' +
+        '<div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">閉じる</button>' +
+        '<button type="button" class="btn btn--primary" id="f_save">保存</button>' +
+      '</div>');
+
+    const updateWarn = function () {
+      const w = timeWarning(row.person_id, readTime($('f_start')), readTime($('f_end')), assignmentId);
+      $('f_warn').textContent = w;
+      $('f_warn').hidden = !w;
+    };
+    App.onTimeFieldsInput($('f_start'), updateWarn);
+    App.onTimeFieldsInput($('f_end'), updateWarn);
+    updateWarn();
+
+    $('f_save').addEventListener('click', function () {
+      if (state.busy) return;
+      const payload = {
+        id: assignmentId,
+        place_id: $('f_place').value,
+        start_time: readTime($('f_start')),
+        end_time: readTime($('f_end')),
+        note: $('f_note').value
+      };
+      // クライアント側の検証は入力補助。判定はサーバー側が本体
+      if (!payload.start_time || !payload.end_time) {
+        showFormError('時刻を入力してください（時は0〜' + App.TIME_MAX_HOUR + '、分は0〜59）。');
+        return;
+      }
+      if (toMin(payload.start_time) >= toMin(payload.end_time)) {
+        showFormError('終了時刻は開始時刻より後にしてください。');
+        return;
+      }
+
+      setBusy(true);
+      call('saveAssignment', state.token, payload)
+        .then(function (data) {
+          state.assignments = state.assignments.map(function (a) {
+            return a.id === assignmentId ? data.assignment : a;
+          });
+          closeModal();
+          render();
+          toast('保存しました');
+        })
+        .catch(function (e) { showFormError(e.message); })
+        .then(function () { setBusy(false); });
+    });
+
+    $('f_unassign').addEventListener('click', function () {
+      doUnassign(assignmentId);
+    });
   }
 
-  function doUnassign(slotId, assignmentId) {
+  /**
+   * 解除。**楽観的更新はしない。**
+   * 人が消える操作なので、サーバーが受けたことを確かめてから画面を書き換える。
+   */
+  function doUnassign(assignmentId) {
     if (state.busy) return;
-    const removed = state.assignments.filter(function (a) { return a.id === assignmentId; })[0];
-    if (!removed) return;
-
-    state.assignments = state.assignments.filter(function (a) { return a.id !== assignmentId; });
-    refreshAssignView(slotId);
-
     setBusy(true);
     call('unassign', state.token, assignmentId)
-      .catch(function (e) {
-        state.assignments = state.assignments.concat([removed]);
-        refreshAssignView(slotId);
-        toast(e.message, true);
+      .then(function () {
+        state.assignments = state.assignments.filter(function (a) { return a.id !== assignmentId; });
+        closeModal();
+        render();
+        toast('解除しました');
       })
+      .catch(function (e) { showFormError(e.message); })
       .then(function () { setBusy(false); });
   }
 
-  /** 3か所すべてを描き直す。1つでも欠けると数字が食い違う */
-  function refreshAssignView(slotId) {
-    renderBoard();
-    renderPeople();
-    renderAssignPanel(slotId);
-  }
-
-  // -------------------------------------------- 時間を指定して入れる（枠を作る）
+  // -------------------------------------------- 人を入れる（空きをタップ）
 
   /*
-    普段の運用はこちらが入口になる。**枠を先に作らなくてよい。**
-    場所の空いているところをタップ → 人を選ぶ → 時間を決める → 枠ができて人が入る。
+    **これが唯一の割り当て経路。** 場所の空いているところをタップ → 人を選ぶ →
+    時間を決める → 1件の割り当てができる。
 
     順番は「人 → 時間」。先に人を選べば、その人が申告した時間帯をそのまま
     初期値にできる（「来られる時間をそのまま入れる」運用に合う）。
   */
 
   /**
-   * 人を選ぶ画面。まだ枠が無いので、時間で候補者を絞り込まずにその日の全員を出す。
+   * 人を選ぶ画面。時間はまだ決まっていないので、その日に申告のある人を全員出す。
    *
    * @param {string} placeId
-   * @param {Object} preset 仮の時間帯（タップ位置、または元の枠の時間）
-   * @param {Function=} back 「戻る」で戻る先。省略時は閉じる
+   * @param {Object} preset タップ位置から割り出した仮の時間帯
    */
-  function openNewAssignPanel(placeId, preset, back) {
-    const rows = dayCandidates(preset);
+  function openNewAssignPanel(placeId, preset) {
+    const rows = dayCandidates(placeId, preset);
 
     openModal(placeNameOf(placeId) + ' に人を入れる',
       '<p class="panelHead">入れる人を選んでください</p>' +
-      '<p class="hint">選んだあとに時間を決めます。枠はそのときに作られます。</p>' +
+      '<p class="hint">選んだあとに時間を決めます。</p>' +
       (rows.length === 0
         ? '<p class="empty empty--sm">この日に入れる人がまだいません。' +
           '応募フォームからの登録をお待ちください。</p>'
         : '<section class="assignSec">' +
             volunteerStaffHtml(rows, dayCandidateRowHtml) +
           '</section>') +
-      '<div class="formActions">' +
-        (back ? '<button type="button" class="btn" id="n_back">戻る</button>' : '') +
-        '<div class="formActions__spacer"></div>' +
-        '<button type="button" class="btn" data-close="1">閉じる</button>' +
-      '</div>');
-
-    if (back) $('n_back').addEventListener('click', back);
+      '<div class="formActions"><div class="formActions__spacer"></div>' +
+        '<button type="button" class="btn" data-close="1">閉じる</button></div>');
 
     $('modalBody').querySelectorAll('[data-pick]').forEach(function (el) {
       el.addEventListener('click', function () {
         openTimePickPanel(placeId, el.dataset.pick, {
           start_time: el.dataset.start,
           end_time: el.dataset.end
-        }, function () { openNewAssignPanel(placeId, preset, back); });
+        }, function () { openNewAssignPanel(placeId, preset); });
       });
     });
   }
@@ -1247,7 +1011,7 @@
    * 時間が決まっていないのでダブルブッキングの除外はできない。
    * 重なりは時間を決める画面で知らせ、最終的にはサーバー側が弾く。
    */
-  function dayCandidates(preset) {
+  function dayCandidates(placeId, preset) {
     const avail = availabilityByPerson();
     const load = loadByPerson();
     const hintStart = preset && preset.start_time ? toMin(preset.start_time) : null;
@@ -1277,16 +1041,6 @@
     return rows.sort(compareCandidates);
   }
 
-  /** ボランティアと職員に分けて並べる。ボランティア優先が画面から分かるようにする */
-  function volunteerStaffHtml(rows, rowFn) {
-    const volunteers = rows.filter(function (r) { return r.person.type !== 'staff'; });
-    const staff = rows.filter(function (r) { return r.person.type === 'staff'; });
-    return (volunteers.length > 0
-        ? '<h4>ボランティア</h4><ul class="pList">' + volunteers.map(rowFn).join('') + '</ul>' : '') +
-      (staff.length > 0
-        ? '<h4>職員</h4><ul class="pList">' + staff.map(rowFn).join('') + '</ul>' : '');
-  }
-
   function dayCandidateRowHtml(row) {
     return pickRowHtml(
       'data-pick="' + esc(row.person.id) + '"' +
@@ -1295,12 +1049,7 @@
       row.person, row.ranges);
   }
 
-  /**
-   * 時間を決める画面。ここで登録すると、その時間の枠ができて人が入る。
-   *
-   * 初期値は選んだ人の申告時間帯。必要人数の既定は1名（＝その人で充足）で、
-   * 「ここは3名ほしい」と分かっているときだけ増やす。
-   */
+  /** 時間を決める画面。ここで登録すると1件の割り当てができる */
   function openTimePickPanel(placeId, personId, preset, back) {
     const person = personOf(personId);
     if (!person) return;
@@ -1319,6 +1068,8 @@
         '<div><label>終了</label>' +
           timeFields({ id: 'n_end', value: end, label: '終了' }) + '</div>' +
       '</div>' +
+      '<div class="field"><label for="n_note">メモ（任意）</label>' +
+        '<input type="text" id="n_note" maxlength="100"></div>' +
       '<p class="warnLine" id="n_warn" hidden></p>' +
       '<div class="formActions">' +
         (back ? '<button type="button" class="btn" id="n_back">戻る</button>' : '') +
@@ -1330,7 +1081,7 @@
     if (back) $('n_back').addEventListener('click', back);
 
     const updateWarn = function () {
-      const w = timeWarning(personId, readTime($('n_start')), readTime($('n_end')));
+      const w = timeWarning(personId, readTime($('n_start')), readTime($('n_end')), null);
       $('n_warn').textContent = w;
       $('n_warn').hidden = !w;
     };
@@ -1345,8 +1096,8 @@
         place_id: placeId,
         start_time: readTime($('n_start')),
         end_time: readTime($('n_end')),
-        // 必要人数は画面から入力させない。1つの枠に1人までなので常に1（design.md 6.6）
-        person_id: personId
+        person_id: personId,
+        note: $('n_note').value
       };
       if (!payload.start_time || !payload.end_time) {
         showFormError('時刻を入力してください（時は0〜' + App.TIME_MAX_HOUR + '、分は0〜59）。');
@@ -1356,7 +1107,7 @@
         showFormError('終了時刻は開始時刻より後にしてください。');
         return;
       }
-      submitNewAssign(payload);
+      submitAssign(payload);
     });
   }
 
@@ -1371,22 +1122,24 @@
 
   /**
    * 選んだ時間についての注意書き。**登録は止めない。**
-   * ダブルブッキングだけはサーバー側が弾くので、ここでは先に気づけるようにする。
+   * 成立しない組み合わせはサーバー側が弾くので、ここでは先に気づけるようにする。
+   *
+   * @param {?string} selfId 編集中の割り当てID（自分自身は衝突相手から除く）
    */
-  function timeWarning(personId, startStr, endStr) {
+  function timeWarning(personId, startStr, endStr, selfId) {
     if (!startStr || !endStr) return '';   // 入力途中は何も言わない
     const start = toMin(startStr);
     const end = toMin(endStr);
     if (start >= end) return '';
 
     const conflict = state.assignments.filter(function (a) {
+      if (a.id === selfId) return false;
       if (a.person_id !== personId) return false;
-      const s = slotOf(a.slot_id);
-      return s && overlapsRange(start, end, toMin(s.start_time), toMin(s.end_time));
+      return overlapsRange(start, end, toMin(a.start_time), toMin(a.end_time));
     })[0];
     if (conflict) {
-      const s = slotOf(conflict.slot_id);
-      return '同じ時間に「' + placeNameOf(s.place_id) + ' ' + tl(s.start_time) + '–' + tl(s.end_time) +
+      return '同じ時間に「' + placeNameOf(conflict.place_id) + ' ' +
+        tl(conflict.start_time) + '–' + tl(conflict.end_time) +
         '」へ割り当て済みです。このままでは登録できません。';
     }
 
@@ -1397,30 +1150,21 @@
   }
 
   /**
-   * 枠の作成と割り当てをまとめて送る。
+   * 割り当てを1件登録する。
    *
-   * ここは**楽観的更新をしない。** 枠のIDがサーバーで決まるため、
-   * 先に画面へ置いても差し替えが必要になり、失敗時の巻き戻しも複雑になる。
+   * **楽観的更新はしない。** IDがサーバーで決まるうえ、同じ場所・同じ時間の
+   * 重なりはサーバーでしか正しく判定できない。先に画面へ置くと巻き戻しが増える。
    */
-  function submitNewAssign(payload) {
+  function submitAssign(payload) {
     setBusy(true);
-    call('assignToNewSlot', state.token, payload)
+    call('assign', state.token, payload)
       .then(function (data) {
-        // 既にある枠が使い回されることもあるので、id で置き換えてから足す
-        state.slots = state.slots
-          .filter(function (s) { return s.id !== data.slot.id; })
-          .concat([data.slot]);
         state.assignments = state.assignments.concat([data.assignment]);
-        renderBoard();
-        renderPeople();
-        // できた枠の状態を確認できるよう、その枠の割り当てパネルへ移る
-        // （1枠1人なので、ここから人を足すことはできない）
-        renderAssignPanel(data.slot.id);
-        toast(data.slotCreated ? '枠を作って割り当てました' : '割り当てました');
+        closeModal();
+        render();
+        toast('割り当てました');
       })
-      .catch(function (e) {
-        showFormError(e.message);
-      })
+      .catch(function (e) { showFormError(e.message); })
       .then(function () { setBusy(false); });
   }
 

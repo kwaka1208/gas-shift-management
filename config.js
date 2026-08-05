@@ -27,38 +27,6 @@ const SHEET_DEFS = {
     ]
   },
 
-  SLOT_TEMPLATES: {
-    name: 'slot_templates',
-    columns: [
-      { id: 'id', type: 'string' },
-      { id: 'template_name', type: 'string' },
-      { id: 'day_of_week', type: 'number' },
-      { id: 'place_id', type: 'string' },
-      { id: 'start_time', type: 'time' },
-      { id: 'end_time', type: 'time' },
-      { id: 'required_count', type: 'number' },
-      { id: 'staff_required', type: 'number' },
-      { id: 'created_at', type: 'string' },
-      { id: 'updated_at', type: 'string' }
-    ]
-  },
-
-  SLOTS: {
-    name: 'slots',
-    columns: [
-      { id: 'id', type: 'string' },
-      { id: 'date', type: 'date' },
-      { id: 'place_id', type: 'string' },
-      { id: 'start_time', type: 'time' },
-      { id: 'end_time', type: 'time' },
-      { id: 'required_count', type: 'number' },
-      { id: 'staff_required', type: 'number' },
-      { id: 'note', type: 'string' },
-      { id: 'created_at', type: 'string' },
-      { id: 'updated_at', type: 'string' }
-    ]
-  },
-
   PEOPLE: {
     name: 'people',
     columns: [
@@ -90,12 +58,26 @@ const SHEET_DEFS = {
     ]
   },
 
+  /**
+   * 1行＝「この日・この場所・この時間に、この人が入る」。
+   *
+   * **かつては slots（枠）と assignments（割り当て）に分かれていた。**
+   * 1つの枠に入るのは1人までという方針にした結果、両者は常に1対1になり、
+   * 枠だけが存在する状態（＝まだ誰も入っていない枠）も表せなくなったため統合した。
+   *
+   * この統合により「必要だがまだ誰もいない」は**データとして持てない。**
+   * 不足の可視化が要るなら、場所ごとの必要時間帯を別テーブルで持つところから設計し直すこと。
+   */
   ASSIGNMENTS: {
     name: 'assignments',
     columns: [
       { id: 'id', type: 'string' },
-      { id: 'slot_id', type: 'string' },
+      { id: 'date', type: 'date' },
+      { id: 'place_id', type: 'string' },
+      { id: 'start_time', type: 'time' },
+      { id: 'end_time', type: 'time' },
       { id: 'person_id', type: 'string' },
+      { id: 'note', type: 'string' },
       { id: 'assigned_by', type: 'string' },
       { id: 'created_at', type: 'string' },
       { id: 'updated_at', type: 'string' }
@@ -200,8 +182,12 @@ const CONFIG_RETIRED_KEYS = [
   'default_slot_required'
 ];
 
-/** 枠の必要人数。1つの枠には1人までなので常にこの値（design.md 6.6） */
-const SLOT_REQUIRED_COUNT = 1;
+/**
+ * 枠の廃止にともなって使わなくなったシート。
+ * **自動では消さない。** 移行後も中身を見返せるよう、`migrateSlots()` が
+ * 名前を変えて残す（`slots_old_...`）。
+ */
+const RETIRED_SHEET_NAMES = ['slots', 'slot_templates'];
 
 /** LockService の待機時間（ミリ秒） */
 const LOCK_TIMEOUT_MS = 10000;

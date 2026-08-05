@@ -214,7 +214,7 @@ input[type="date"] {
 }
 
 /*
-  時間軸と枠の帯は同じ幅・同じ基準で並ぶ。
+  時間軸と割り当ての帯は同じ幅・同じ基準で並ぶ。
   1時間ごとの目盛りは背景のグラデーションで描く（10分刻みのセルを敷き詰めない）。
 */
 .board__axis, .board__lanes {
@@ -253,7 +253,7 @@ input[type="date"] {
 .board__lanes--editable,
 .board__lanes--assignable { cursor: copy; }
 
-/* -------------------------------------------------------------------- 枠 */
+/* ------------------------------------------------------------ 割り当ての帯 */
 
 .slot {
   position: absolute;
@@ -275,17 +275,11 @@ input[type="date"] {
 .slot--editable, .slot--assignable { cursor: pointer; }
 .slot--editable:hover, .slot--assignable:hover { background: #e4eaf1; }
 
-/* まだ誰も入っていない枠。埋まっている枠と見分けが付くよう淡くする */
-.slot--empty {
-  border-left-color: var(--fg-weak);
-  color: var(--fg-weak);
-}
-
 .slot__time { display: block; font-weight: 600; white-space: nowrap; }
-.slot__meta { display: block; color: var(--fg-weak); white-space: nowrap; }
-.slot__note { color: var(--fg-weak); }
+.slot__note { display: block; color: var(--fg-weak); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 
-/* 割り当て済みの氏名。枠が狭いときは切れるが、埋まっているかは .slot__meta で分かる */
+/* 割り当てられた人の氏名。帯が狭いときは `…` で切れる */
 .slot__names {
   display: block;
   white-space: nowrap;
@@ -357,7 +351,7 @@ input[type="date"] {
 .res__busy--tappable { cursor: pointer; border: none; font-family: inherit; }
 .res__busy--tappable:hover { filter: brightness(1.15); }
 
-/* 1人1行。枠のように段を分ける必要はない（同じ人は同時間に1つしか入らない） */
+/* 1人1行。段を分ける必要はない（同じ人は同時間に1つしか入らない） */
 .res__lanes { min-height: 2.75rem; }
 
 .res__free,
@@ -658,7 +652,7 @@ input[type="date"] {
 
 .btn--small { min-height: 2rem; padding: .25rem .625rem; font-size: .8125rem; }
 
-/* 枠そのものの編集（パネル上部）。人の出し入れと視覚的に分ける */
+/* 割り当ての編集（パネル上部） */
 .slotEditActions {
   display: flex;
   gap: .5rem;

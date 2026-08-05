@@ -106,7 +106,7 @@ function withLock_(fn, timeoutMs) {
  * 画面の初期化データ。日付に依存しないものだけを返す。
  *
  * @param {string} token 閲覧トークン
- * @return {{ ok: boolean, data?: { config, places, templateNames }, error?: string }}
+ * @return {{ ok: boolean, data?: { config, places }, error?: string }}
  */
 function getBootstrap(token) {
   return handle_('getBootstrap', function () {
@@ -165,38 +165,35 @@ function submitAvailability(token, payload) {
 // ---------------------------------------------------------------------------
 
 /**
- * 枠に人を割り当てる。
+ * 割り当てを1件作る。**場所・日付・時間帯・人を決めると1行できる**（design.md 3）。
  *
- * **人数では止めない**（人数は場所単位で運用する方針）。
- * 同じ時間に別の枠へ割り当て済みの場合だけはエラーにする。
+ * かつては「枠に人を入れる assign」と「枠を作って入れる assignToNewSlot」に
+ * 分かれていたが、枠の廃止にともなって1本になった。
  *
  * @param {string} token 閲覧トークン
- * @param {string} slotId
- * @param {string} personId
+ * @param {Object} payload date / place_id / start_time / end_time / person_id / note
  */
-function assign(token, slotId, personId) {
+function assign(token, payload) {
   return handle_('assign', function () {
     requireViewToken_(token);
     return withLock_(function () {
-      return assignData_(slotId, personId, LOG_OPERATOR);
+      return assignData_(payload, LOG_OPERATOR);
     });
   });
 }
 
 /**
- * 時間を指定して人を入れる。指定した時間の枠が無ければ作ってから割り当てる。
- *
- * 場所の空いているところをタップしたとき、既存の枠に別の時間で人を入れたいときの
- * 両方から呼ばれる。同じ日付・場所・開始・終了の枠が既にあれば、それを使い回す。
+ * 既にある割り当ての場所・時間帯・メモを直す。
+ * **人は変えない**（替えるときは解除してから入れ直す。service_assign.js 参照）。
  *
  * @param {string} token 閲覧トークン
- * @param {Object} payload date / place_id / start_time / end_time / person_id
+ * @param {Object} payload id / place_id / start_time / end_time / note
  */
-function assignToNewSlot(token, payload) {
-  return handle_('assignToNewSlot', function () {
+function saveAssignment(token, payload) {
+  return handle_('saveAssignment', function () {
     requireViewToken_(token);
     return withLock_(function () {
-      return assignToNewSlotData_(payload, LOG_OPERATOR);
+      return saveAssignmentData_(payload, LOG_OPERATOR);
     });
   });
 }
@@ -227,59 +224,6 @@ function savePlaces(token, places) {
     requireViewToken_(token);
     return withLock_(function () {
       return savePlacesData_(places, LOG_OPERATOR);
-    });
-  });
-}
-
-/**
- * 指定日の枠をまとめて保存する。
- * 送られてこなかった枠は削除される（ただし割り当てのある枠は削除できない）。
- *
- * @param {string} token 閲覧トークン
- * @param {string} date 'YYYY-MM-DD'
- * @param {Array<Object>} slots その日の枠の全件
- */
-function saveSlots(token, date, slots) {
-  return handle_('saveSlots', function () {
-    requireViewToken_(token);
-    return withLock_(function () {
-      return saveSlotsData_(date, slots, LOG_OPERATOR);
-    });
-  });
-}
-
-/**
- * 週テンプレートから期間分の枠を生成する。
- * 同じ枠が既にあればスキップするので、二度実行しても増えない。
- *
- * @param {string} token 閲覧トークン
- * @param {string} templateName slot_templates の template_name
- * @param {string} fromDate 'YYYY-MM-DD'
- * @param {string} toDate 'YYYY-MM-DD'
- */
-function generateSlots(token, templateName, fromDate, toDate) {
-  return handle_('generateSlots', function () {
-    requireViewToken_(token);
-    return withLock_(function () {
-      return generateSlotsData_(templateName, fromDate, toDate, LOG_OPERATOR);
-    });
-  });
-}
-
-/**
- * 枠をコピーする（前日コピー: dayCount=1 / 前週コピー: dayCount=7）。
- * 割り当てはコピーしない。
- *
- * @param {string} token 閲覧トークン
- * @param {string} fromDate コピー元の開始日
- * @param {string} toDate コピー先の開始日
- * @param {number} dayCount コピーする日数（既定1）
- */
-function copySlots(token, fromDate, toDate, dayCount) {
-  return handle_('copySlots', function () {
-    requireViewToken_(token);
-    return withLock_(function () {
-      return copySlotsData_(fromDate, toDate, dayCount, LOG_OPERATOR);
     });
   });
 }

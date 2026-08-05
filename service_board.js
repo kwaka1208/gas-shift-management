@@ -14,8 +14,9 @@
  *     閲覧URLに `&view=admin` を足せば誰でも開けるので、**秘匿ではなく目隠しである**
  *   - `_config` のうち view_token は絶対に返さない
  *
- * 充足判定（design.md 6.4）と整合性警告（6.5）は Phase 4 で追加する。
- * このファイルの返却形（warnings[]）は、そのときに中身が入る前提で先に用意してある。
+ * **充足判定・整合性警告（旧 Phase 4）は作らない。** 枠を廃止して割り当てと統合した結果、
+ * 「必要だがまだ誰もいない」をデータとして持てなくなったため、不足を機械的に出せない。
+ * 必要になったら、場所ごとの必要時間帯を持つテーブルから設計し直すこと。
  */
 
 /** クライアントへ渡してよい `_config` のキー。ここに無いキーは返さない（ホワイトリスト） */
@@ -36,29 +37,13 @@ const PUBLIC_CONFIG_KEYS_ = [
  * 画面の初期化に必要な、日付に依存しないデータを返す。
  * 日付を切り替えても変わらないものだけを置くこと（毎回転送されるため）。
  *
- * @return {{ config: Object, places: Array, templateNames: Array<string> }}
+ * @return {{ config: Object, places: Array }}
  */
 function buildBootstrap_() {
   return {
     config: publicConfig_(),
-    places: readPlaces_(),
-    // テンプレート本体は運用者がシートを直接編集する。画面では名前を選ばせるだけなので
-    // 名前の一覧だけを渡す
-    templateNames: readTemplateNames_()
+    places: readPlaces_()
   };
-}
-
-/** `slot_templates` に登録されているテンプレート名の一覧（重複を除く） */
-function readTemplateNames_() {
-  const seen = {};
-  const out = [];
-  readTable_(SHEET_DEFS.SLOT_TEMPLATES).forEach(function (t) {
-    const name = trimStr_(t.template_name);
-    if (!name || seen[name]) return;
-    seen[name] = true;
-    out.push(name);
-  });
-  return out.sort(function (a, b) { return a.localeCompare(b, 'ja'); });
 }
 
 /** `_config` のうち公開してよい値だけを返す */
@@ -116,26 +101,26 @@ function buildDayBoard_(date, admin) {
   }
   const nameStyle = getConfigValue_(CONFIG_KEY.PUBLIC_NAME_STYLE, 'full');
 
-  const slots = readSlotsByDate_(date);
+  const assignments = readAssignmentsByDate_(date);
   const availability = readAvailabilityByDate_(date);
-  const assignments = readAssignmentsBySlotIds_(slots.map(function (s) { return s.id; }));
-
   const people = readRelatedPeople_(assignments, availability);
 
   return {
     date: date,
-    slots: slots,
     assignments: assignments,
     availability: availability,
-    people: people.map(function (p) { return toPublicPerson_(p, nameStyle, admin === true); }),
-    // TODO(Phase 4): design.md 6.5 の整合性警告をここで組み立てる
-    warnings: []
+    people: people.map(function (p) { return toPublicPerson_(p, nameStyle, admin === true); })
   };
 }
 
-/** 指定日の枠。場所の表示順 → 開始時刻の順に並べる */
-function readSlotsByDate_(date) {
-  const rows = readTable_(SHEET_DEFS.SLOTS, function (r) { return r.date === date; });
+/**
+ * 指定日の割り当て。場所の表示順 → 開始時刻の順に並べる。
+ *
+ * **1行が「誰がどこにいつ入るか」を丸ごと持つ**（design.md 3 assignments）。
+ * かつてここは枠と割り当ての2回読みだったが、統合して1回になった。
+ */
+function readAssignmentsByDate_(date) {
+  const rows = readTable_(SHEET_DEFS.ASSIGNMENTS, function (r) { return r.date === date; });
   const order = placeOrderMap_();
 
   rows.sort(function (a, b) {
@@ -146,25 +131,7 @@ function readSlotsByDate_(date) {
     return a.end_time < b.end_time ? -1 : 1;
   });
 
-  return rows.map(function (s) {
-    return {
-      id: s.id,
-      date: s.date,
-      place_id: s.place_id,
-      start_time: s.start_time,
-      end_time: s.end_time,
-      required_count: s.required_count === null ? 0 : s.required_count,
-      staff_required: s.staff_required === null ? 0 : s.staff_required,
-      note: s.note
-    };
-  });
-}
-
-/** place_id → 表示順（並べ替え用） */
-function placeOrderMap_() {
-  const map = {};
-  readPlaces_().forEach(function (p, i) { map[p.id] = i; });
-  return map;
+  return rows.map(publicAssignment_);
 }
 
 /** 指定日の可用性 */
@@ -176,25 +143,16 @@ function readAvailabilityByDate_(date) {
         person_id: a.person_id,
         date: a.date,
         start_time: a.start_time,
-        end_time: a.end_time,
-        virtual: false
+        end_time: a.end_time
       };
     });
 }
 
-/** 指定した枠に対する割り当て */
-function readAssignmentsBySlotIds_(slotIds) {
-  if (slotIds.length === 0) return [];
-  const target = new Set(slotIds);
-  return readTable_(SHEET_DEFS.ASSIGNMENTS, function (r) { return target.has(r.slot_id); })
-    .map(function (a) {
-      return {
-        id: a.id,
-        slot_id: a.slot_id,
-        person_id: a.person_id,
-        assigned_by: a.assigned_by
-      };
-    });
+/** place_id → 表示順（並べ替え用） */
+function placeOrderMap_() {
+  const map = {};
+  readPlaces_().forEach(function (p, i) { map[p.id] = i; });
+  return map;
 }
 
 /**
