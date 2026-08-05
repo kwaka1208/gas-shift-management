@@ -3,7 +3,7 @@
  *
  * 【枠の作られ方は2通りある】
  *
- *   1. 先に枠を作っておく … 「既定の枠」（service_slot.gs）
+ *   1. 先に枠を作っておく … 週テンプレートからの生成、日/週コピー（service_slot.gs）
  *   2. **割り当てのときに作る** … 場所と人と時間を選ぶと、その時間の枠ができて人が入る
  *
  * 2 が普段の運用で、1 は「まだ誰も入っていない枠」を先に置きたいときに使う。
@@ -11,6 +11,7 @@
  *
  * 同じ日付・場所・開始・終了の枠が既にあれば**それを使い回す**。
  * 同じ時間の枠がいくつも増えると、配置表が段だらけになって読めなくなるため。
+ * 使い回した枠が既に埋まっていれば `doAssign_` が弾く（1枠1人）。
  *
  * 【このファイルの3つの約束】
  *
@@ -19,11 +20,10 @@
  *    「画面を開いた時点のデータ」に基づく。書く直前にサーバーで読み直して
  *    再検証しない限り、二重割り当てを防げない（design.md 7 排他制御）。
  *
- * 2. **弾くのは「事実として成立しない割り当て」だけにする。**
- *    - 同じ枠への二重割り当て … 弾く
+ * 2. **弾くのは「事実として成立しない割り当て」と「1枠1人」だけにする。**
+ *    - **1つの枠に2人目 … 弾く**（design.md 6.6）。同じ時間に複数人を置きたい場合は、
+ *      場所を複数作って運用する
  *    - 同日の重なる枠への割り当て … 弾く（体はひとつしかない）
- *    - 必要人数 … **見ない。** 人数は場所単位で運用する方針にしたため、枠の
- *      required_count で人数を止めることはしない
  *    - 可用性が枠を覆っていない … **弾かない。** design.md 6.5 の考え方（警告は表示のみ、
  *      自動削除はしない）に合わせ、Phase 4 で `no_availability` 警告として出す
  *
@@ -76,8 +76,8 @@ function assignToNewSlotData_(input, operator) {
     place_id: payload.place_id,
     start_time: payload.start_time,
     end_time: payload.end_time,
-    // 人数は画面で扱わない（場所単位で管理する方針）。`_config` の既定値を入れておく
-    required_count: getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_REQUIRED, 1),
+    // 1つの枠に入れるのは1人まで（design.md 6.6）。人数は常に固定
+    required_count: SLOT_REQUIRED_COUNT,
     staff_required: payload.staff_required,
     note: payload.note
   }, date, placeById, unit, '枠', errors, null); // 新規作成なので場所の検証は厳格でよい
@@ -163,11 +163,27 @@ function doAssign_(slot, personId, operator) {
   });
 
   // --- 検証 ---------------------------------------------------------------
-  if (mine.some(function (a) { return a.slot_id === slot.id; })) {
-    throw new Error(person.name + 'さんは、この枠に既に割り当てられています。');
+  const placeById = indexById_(readTable_(SHEET_DEFS.PLACES));
+
+  /*
+    **1つの枠に入れるのは1人まで**（design.md 6.6）。
+    複数人を置きたい場所は、場所そのものを複数作って運用する。
+
+    本人が既に入っている場合と、別の人が入っている場合とで文言を分ける。
+    「埋まっている」とだけ言われても、画面を更新すべきなのか
+    自分の操作が重複したのかが分からないため。
+  */
+  const occupied = dayAssignments.filter(function (a) { return a.slot_id === slot.id; })[0];
+  if (occupied) {
+    if (resolvePersonId_(occupied.person_id, peopleById) === pid) {
+      throw new Error(person.name + 'さんは、この枠に既に割り当てられています。');
+    }
+    const who = peopleById.get(resolvePersonId_(occupied.person_id, peopleById));
+    throw new Error('この枠には既に' + (who ? who.name + 'さん' : '別の人') +
+      'が入っています。1つの枠に入れるのは1人までです。\n' +
+      '先にその人を解除するか、「時間を指定して入れる」から別の枠を作ってください。');
   }
 
-  const placeById = indexById_(readTable_(SHEET_DEFS.PLACES));
   const start = toMinutes_(slot.start_time);
   const end = toMinutes_(slot.end_time);
 
@@ -180,7 +196,8 @@ function doAssign_(slot, personId, operator) {
   if (conflict) {
     const other = daySlotById.get(conflict.slot_id);
     throw new Error(person.name + 'さんは同じ時間に「' + placeName_(placeById, other.place_id) + ' ' +
-      other.start_time + '–' + other.end_time + '」へ割り当て済みです。先にそちらを解除してください。');
+      toDisplayTime_(other.start_time) + '–' + toDisplayTime_(other.end_time) +
+      '」へ割り当て済みです。先にそちらを解除してください。');
   }
 
   // --- 書き込み -----------------------------------------------------------

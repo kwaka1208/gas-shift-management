@@ -42,6 +42,9 @@
   const esc = App.esc;
   const toMin = App.toMin;
   const toHHMM = App.toHHMM;
+  // 時刻を人に見せるときは必ずこちらを通す。24時以降が「翌01:00」になる
+  const tl = App.timeLabel;
+  const ml = App.minLabel;
   const addDays = App.addDays;
   const dowOf = App.dowOf;
   const todayStr = App.todayStr;
@@ -217,36 +220,19 @@
       $('board').querySelectorAll('.slot--assignable').forEach(function (el) {
         el.addEventListener('click', function (e) {
           e.stopPropagation();
-          // 仮想の枠には割り当てパネルを開けない（枠の実体が無いため）。
-          // 人を選ぶ画面へ進み、登録した時点で枠が生まれる
-          if (isVirtualId(el.dataset.id)) openNewAssignPanel(el.dataset.place, presetOfEl(el));
-          else openAssignPanel(el.dataset.id);
+          openAssignPanel(el.dataset.id);
         });
       });
     }
   }
 
-  /** サーバーが補った仮想の枠か（シートに行が無い） */
-  function isVirtualId(id) {
-    return String(id).indexOf('virtual:') === 0;
-  }
+  /*
+    かつてここには isVirtualId / realSlots / presetOfEl があった。
 
-  function presetOfEl(el) {
-    return {
-      place_id: el.dataset.place,
-      start_time: el.dataset.start,
-      end_time: el.dataset.end
-    };
-  }
-
-  /**
-   * シートに実在する枠だけ。
-   * **saveSlots へ送る前に必ずこれを通す。** 仮想の枠を混ぜると
-   * 「存在しない枠です」と拒否される。
-   */
-  function realSlots() {
-    return state.slots.filter(function (s) { return !s.virtual; });
-  }
+    枠が1つも無い場所に破線の「既定の枠」を仮想的に出す機能を廃止したため、
+    **state.slots はシートに実在する枠だけになった。** 仮想の枠を選り分ける必要は無い。
+    saveSlots へは state.slots をそのまま送ってよい。
+  */
 
   /** 表示する場所。廃止済みでも、その日の枠が残っていれば表示する */
   function visiblePlaces() {
@@ -301,7 +287,7 @@
       const edge = m === dayStart ? ' board__tick--first'
         : (m + 60 > dayEnd ? ' board__tick--last' : '');
       html += '<span class="board__tick' + edge +
-        '" style="left:' + left + '%">' + toHHMM(m) + '</span>';
+        '" style="left:' + left + '%">' + ml(m) + '</span>';
     }
     return html;
   }
@@ -332,8 +318,7 @@
     state.availability.forEach(function (a) {
       ensure(a.person_id).free.push({
         start: toMin(a.start_time),
-        end: toMin(a.end_time),
-        virtual: a.virtual === true
+        end: toMin(a.end_time)
       });
     });
 
@@ -345,7 +330,7 @@
         start: toMin(s.start_time),
         end: toMin(s.end_time),
         place: placeNameOf(s.place_id),
-        time: s.start_time + '–' + s.end_time
+        time: tl(s.start_time) + '–' + tl(s.end_time)
       });
     });
 
@@ -468,8 +453,7 @@
     const free = row.free.map(function (f) {
       const box = clipRange(f, dayStart, total);
       if (!box) return '';
-      // 職員の既定勤務時間帯は本人の申告ではないので、区別が付くようにする
-      return '<span class="res__free' + (f.virtual ? ' res__free--virtual' : '') + '"' +
+      return '<span class="res__free"' +
         ' style="left:' + box.left + '%;width:' + box.width + '%"></span>';
     }).join('');
 
@@ -627,12 +611,10 @@
     // 管理URLでは枠をタップすると割り当てパネルが開く
     const assignable = state.adminMode;
     const tag = assignable ? 'button' : 'div';
-    // 仮想の枠（_config の既定時間帯。まだシートに無い）。人を入れた時点で実体になる
-    const virtual = !!slot.virtual;
 
     const list = assignmentsOfSlot(slot.id);
-    // **必要人数は画面に出さない**（場所単位で管理する方針）。名前が入っているかを見せる
-    const meta = virtual ? '既定の枠' : (list.length === 0 ? '未割当' : list.length + '名');
+    // **1つの枠に入るのは1人まで**（design.md 6.6）。人数ではなく埋まったかどうかを見せる
+    const meta = list.length === 0 ? '未割当' : '割当済み';
     /*
       名前に続けて性別・年齢と職員の印を括弧でまとめる（例: 「鈴木 花子（女42）」
       「伊藤 誠（男38・職）」）。帯は1行で `…` に切られるため、括弧の中身は最小限にする。
@@ -646,12 +628,12 @@
 
     return '<' + tag + (assignable ? ' type="button"' : '') +
       ' class="slot' + (assignable ? ' slot--assignable' : '') +
-        (virtual ? ' slot--virtual' : '') + '"' +
+        (list.length === 0 ? ' slot--empty' : '') + '"' +
       ' data-id="' + esc(slot.id) + '"' +
       ' data-place="' + esc(slot.place_id) + '"' +
       ' data-start="' + esc(slot.start_time) + '" data-end="' + esc(slot.end_time) + '"' +
       ' style="left:' + left + '%;width:' + width + '%;top:' + top + '">' +
-      '<span class="slot__time">' + esc(slot.start_time) + '–' + esc(slot.end_time) + '</span>' +
+      '<span class="slot__time">' + esc(tl(slot.start_time)) + '–' + esc(tl(slot.end_time)) + '</span>' +
       '<span class="slot__meta">' + esc(meta) +
         (slot.note ? ' <span class="slot__note">' + esc(slot.note) + '</span>' : '') +
       '</span>' +
@@ -789,82 +771,6 @@
       '<label class="toggle"><input type="checkbox" class="active"' + (p.active ? ' checked' : '') +
         '><span>表示</span></label>' +
     '</li>';
-  }
-
-  // ------------------------------------------------------- 既定の枠を作る
-
-  /**
-   * 破線で表示されている既定の枠を、まとめて**実体にする**。
-   *
-   * 既定の枠は普段シートに書かれない（画面の上だけに存在する）。人を入れれば
-   * その場で実体になるが、**誰も入っていない枠を先に残したいとき**はこれを使う。
-   * 「あと2名ほしい」という不足を画面に残せるのは、実体のある枠だけ。
-   *
-   * 時間帯と必要人数は `_config` の `default_slot_start` / `default_slot_end` /
-   * `default_slot_required` に従う。
-   *
-   * 保存は既存の saveSlots を使う（その日の一覧を丸ごと送る仕組み）。
-   */
-  function openDefaultSlotsModal() {
-    const cfg = state.config;
-    const start = cfg.default_slot_start || cfg.day_start;
-    const end = cfg.default_slot_end || cfg.day_end;
-
-    const places = state.places.filter(function (p) { return p.active; });
-    // 同じ場所・同じ時間の枠が既に**実体として**あるなら作らない（二重に作らせない）
-    const already = {};
-    realSlots().forEach(function (s) {
-      if (s.start_time === start && s.end_time === end) already[s.place_id] = true;
-    });
-    const targets = places.filter(function (p) { return !already[p.id]; });
-
-    if (places.length === 0) {
-      openModal('既定の枠を作る',
-        '<p>場所が登録されていません。先に「場所」から登録してください。</p>' +
-        '<div class="formActions"><div class="formActions__spacer"></div>' +
-        '<button type="button" class="btn" data-close="1">閉じる</button></div>');
-      return;
-    }
-
-    openModal('既定の枠を作る',
-      '<p class="formError" hidden></p>' +
-      '<p class="panelHead">' + esc(state.date) + ' に ' + esc(start) + '–' + esc(end) + ' の枠を作ります</p>' +
-      '<p class="hint">破線で出ている既定の枠を、シート上の枠として残します。' +
-        '人を入れるだけなら、この操作は要りません（入れた時点で枠ができます）。</p>' +
-      (targets.length === 0
-        ? '<p class="empty empty--sm">すべての場所に、この時間帯の枠が既にあります。</p>'
-        : '<ul class="pList">' + targets.map(function (p) {
-            return '<li class="pRow"><span class="pName">' + esc(p.name) + '</span>' +
-              '<span class="pLoad">' + esc(start) + '–' + esc(end) + '</span></li>';
-          }).join('') + '</ul>' +
-          '') +
-      (Object.keys(already).length > 0
-        ? '<p class="hint">同じ時間帯の枠が既にある場所は除いてあります。</p>' : '') +
-      '<p class="hint">時間帯は _config の default_slot_start / default_slot_end に従います。' +
-        '他の日にも同じ枠がほしいときは、作ったあとに「コピー」を使ってください。</p>' +
-      '<div class="formActions"><div class="formActions__spacer"></div>' +
-        '<button type="button" class="btn" data-close="1">キャンセル</button>' +
-        (targets.length === 0 ? ''
-          : '<button type="button" class="btn btn--primary" id="d_run">作成</button>') +
-      '</div>');
-
-    if (targets.length === 0) return;
-
-    $('d_run').addEventListener('click', function () {
-      const added = targets.map(function (p) {
-        return {
-          id: '',
-          place_id: p.id,
-          start_time: start,
-          end_time: end,
-          // 人数は画面で扱わない。_config の既定値をそのまま入れる
-          required_count: cfg.default_slot_required || 1,
-          staff_required: 0,
-          note: ''
-        };
-      });
-      submitSlots(realSlots().concat(added), added.length + '件の枠を作りました');
-    });
   }
 
   // ------------------------------------------------------------ 割り当て
@@ -1013,7 +919,7 @@
 
       // 枠のうち実際に入れる部分だけを示す
       row.ranges = touching.map(function (r) {
-        return toHHMM(Math.max(r.start, start)) + '–' + toHHMM(Math.min(r.end, end));
+        return ml(Math.max(r.start, start)) + '–' + ml(Math.min(r.end, end));
       }).join('、');
       // 時間指定で入れるときの初期値（枠と可用性が重なっている部分）
       row.preset_start = toHHMM(Math.max(touching[0].start, start));
@@ -1063,7 +969,7 @@
     const panelEl = document.querySelector('.modal__panel');
     const keepScroll = ($('modal').hidden || !panelEl) ? 0 : panelEl.scrollTop;
 
-    openModal(placeNameOf(slot.place_id) + ' ' + slot.start_time + '–' + slot.end_time,
+    openModal(placeNameOf(slot.place_id) + ' ' + tl(slot.start_time) + '–' + tl(slot.end_time),
       '<p class="formError" hidden></p>' +
       // --- 枠そのものの編集 ---
       '<div class="field"><label for="f_place">場所</label>' +
@@ -1081,9 +987,17 @@
         '<button type="button" class="btn btn--primary" id="f_save">枠を保存</button>' +
       '</div>' +
       // --- 人の出し入れ ---
+      /*
+        **1つの枠に入るのは1人まで**（design.md 6.6）。
+        埋まっている枠では候補の一覧をそもそも出さない。押せない名前を並べても、
+        なぜ入らないのかが分からず、解除すればよいことにも気づけない。
+      */
       assignedSectionHtml(assigned) +
-      candidateSectionHtml(cand.full) +
-      partialSectionHtml(cand.partial) +
+      (assigned.length > 0
+        ? '<p class="hint">1つの枠に入れるのは1人までです。別の人に替えるときは、' +
+          '上の「解除」を押してから選び直してください。同じ時間に複数人を置きたい場合は、' +
+          '場所を分けて登録してください。</p>'
+        : candidateSectionHtml(cand.full) + partialSectionHtml(cand.partial)) +
       // 枠の時間とは違う時間で入れたいとき。指定した時間の枠が新しくできる
       '<button type="button" class="btn btn--block btn--sub" id="a_time">時間を指定して入れる</button>' +
       '<div class="formActions"><div class="formActions__spacer"></div>' +
@@ -1105,19 +1019,19 @@
       };
       // クライアント側の検証は入力補助。判定はサーバー側が本体
       if (!edited.start_time || !edited.end_time) {
-        showFormError('時刻を入力してください（時は0〜23、分は0〜59）。');
+        showFormError('時刻を入力してください（時は0〜' + App.TIME_MAX_HOUR + '、分は0〜59）。');
         return;
       }
       if (toMin(edited.start_time) >= toMin(edited.end_time)) {
         showFormError('終了時刻は開始時刻より後にしてください。');
         return;
       }
-      const next = realSlots().filter(function (s) { return s.id !== slotId; }).concat([edited]);
+      const next = state.slots.filter(function (s) { return s.id !== slotId; }).concat([edited]);
       submitSlots(next, '枠を保存しました');
     });
 
     $('f_delete').addEventListener('click', function () {
-      const next = realSlots().filter(function (s) { return s.id !== slotId; });
+      const next = state.slots.filter(function (s) { return s.id !== slotId; });
       submitSlots(next, '枠を削除しました');
     });
 
@@ -1356,7 +1270,7 @@
         load: load[p.id] || 0,
         preset_start: toHHMM(base.start),
         preset_end: toHHMM(base.end),
-        ranges: ranges.map(function (r) { return toHHMM(r.start) + '–' + toHHMM(r.end); }).join('、')
+        ranges: ranges.map(function (r) { return ml(r.start) + '–' + ml(r.end); }).join('、')
       });
     });
 
@@ -1431,11 +1345,11 @@
         place_id: placeId,
         start_time: readTime($('n_start')),
         end_time: readTime($('n_end')),
-        // 必要人数は画面から入力させない。`_config` の default_slot_required を使う
+        // 必要人数は画面から入力させない。1つの枠に1人までなので常に1（design.md 6.6）
         person_id: personId
       };
       if (!payload.start_time || !payload.end_time) {
-        showFormError('時刻を入力してください（時は0〜23、分は0〜59）。');
+        showFormError('時刻を入力してください（時は0〜' + App.TIME_MAX_HOUR + '、分は0〜59）。');
         return;
       }
       if (toMin(payload.start_time) >= toMin(payload.end_time)) {
@@ -1451,7 +1365,7 @@
     const ranges = availabilityByPerson()[personId] || [];
     if (ranges.length === 0) return 'この日の申告はありません。';
     return '申告: ' + ranges.map(function (r) {
-      return toHHMM(r.start) + '–' + toHHMM(r.end);
+      return ml(r.start) + '–' + ml(r.end);
     }).join('、');
   }
 
@@ -1472,7 +1386,7 @@
     })[0];
     if (conflict) {
       const s = slotOf(conflict.slot_id);
-      return '同じ時間に「' + placeNameOf(s.place_id) + ' ' + s.start_time + '–' + s.end_time +
+      return '同じ時間に「' + placeNameOf(s.place_id) + ' ' + tl(s.start_time) + '–' + tl(s.end_time) +
         '」へ割り当て済みです。このままでは登録できません。';
     }
 
@@ -1492,16 +1406,15 @@
     setBusy(true);
     call('assignToNewSlot', state.token, payload)
       .then(function (data) {
-        // 既にある枠が使い回されることもあるので、id で置き換えてから足す。
-        // その場所の仮想の枠は、実体ができたので取り除く（二重に描かれるのを防ぐ）
-        state.slots = state.slots.filter(function (s) {
-          if (s.id === data.slot.id) return false;
-          return !(s.virtual && s.place_id === data.slot.place_id);
-        }).concat([data.slot]);
+        // 既にある枠が使い回されることもあるので、id で置き換えてから足す
+        state.slots = state.slots
+          .filter(function (s) { return s.id !== data.slot.id; })
+          .concat([data.slot]);
         state.assignments = state.assignments.concat([data.assignment]);
         renderBoard();
         renderPeople();
-        // 続けて同じ枠へ人を足せるよう、その枠の割り当てパネルへ移る
+        // できた枠の状態を確認できるよう、その枠の割り当てパネルへ移る
+        // （1枠1人なので、ここから人を足すことはできない）
         renderAssignPanel(data.slot.id);
         toast(data.slotCreated ? '枠を作って割り当てました' : '割り当てました');
       })
@@ -1528,7 +1441,6 @@
   */
   if (state.adminMode) {
     $('placesBtn').addEventListener('click', openPlacesModal);
-    $('defaultSlotsBtn').addEventListener('click', openDefaultSlotsModal);
   }
 
   boot();

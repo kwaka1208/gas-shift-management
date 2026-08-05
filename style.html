@@ -275,24 +275,17 @@ input[type="date"] {
 .slot--editable, .slot--assignable { cursor: pointer; }
 .slot--editable:hover, .slot--assignable:hover { background: #e4eaf1; }
 
-/*
-  仮想の枠（_config の既定時間帯）。まだシートに無いことが一目で分かるよう、
-  破線と淡い色にする。人を入れると実線の枠になる。
-*/
-.slot--virtual {
-  background: transparent;
-  border: 1px dashed var(--slot-line);
-  border-left: 3px dashed var(--fg-weak);
+/* まだ誰も入っていない枠。埋まっている枠と見分けが付くよう淡くする */
+.slot--empty {
+  border-left-color: var(--fg-weak);
   color: var(--fg-weak);
 }
-
-.slot--virtual:hover { background: var(--accent-weak); }
 
 .slot__time { display: block; font-weight: 600; white-space: nowrap; }
 .slot__meta { display: block; color: var(--fg-weak); white-space: nowrap; }
 .slot__note { color: var(--fg-weak); }
 
-/* 割り当て済みの氏名。枠が狭いときは切れるが、人数は .slot__meta で分かる */
+/* 割り当て済みの氏名。枠が狭いときは切れるが、埋まっているかは .slot__meta で分かる */
 .slot__names {
   display: block;
   white-space: nowrap;
@@ -379,12 +372,6 @@ input[type="date"] {
 .res__free {
   background: var(--res-free);
   border: 1px solid var(--res-free-line);
-}
-
-/* 職員の既定勤務時間帯（本人の申告ではない） */
-.res__free--virtual {
-  background: transparent;
-  border-style: dashed;
 }
 
 /* 割り当て済み。可用の帯に重ねて描く */

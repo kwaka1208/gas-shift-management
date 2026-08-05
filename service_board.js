@@ -23,11 +23,8 @@ const PUBLIC_CONFIG_KEYS_ = [
   CONFIG_KEY.DAY_START,
   CONFIG_KEY.DAY_END,
   CONFIG_KEY.SLOT_UNIT_MINUTES,
-  CONFIG_KEY.STAFF_DEFAULT_START,
-  CONFIG_KEY.STAFF_DEFAULT_END,
-  CONFIG_KEY.DEFAULT_SLOT_START,
-  CONFIG_KEY.DEFAULT_SLOT_END,
-  CONFIG_KEY.DEFAULT_SLOT_REQUIRED,
+  CONFIG_KEY.ENTRY_DEFAULT_START,
+  CONFIG_KEY.ENTRY_DEFAULT_END,
   CONFIG_KEY.PUBLIC_NAME_STYLE
 ];
 
@@ -124,13 +121,12 @@ function buildDayBoard_(date, admin) {
   const assignments = readAssignmentsBySlotIds_(slots.map(function (s) { return s.id; }));
 
   const people = readRelatedPeople_(assignments, availability);
-  const withVirtual = appendStaffDefaultAvailability_(availability, people, date);
 
   return {
     date: date,
-    slots: appendDefaultSlots_(slots, date),
+    slots: slots,
     assignments: assignments,
-    availability: withVirtual,
+    availability: availability,
     people: people.map(function (p) { return toPublicPerson_(p, nameStyle, admin === true); }),
     // TODO(Phase 4): design.md 6.5 の整合性警告をここで組み立てる
     warnings: []
@@ -159,51 +155,9 @@ function readSlotsByDate_(date) {
       end_time: s.end_time,
       required_count: s.required_count === null ? 0 : s.required_count,
       staff_required: s.staff_required === null ? 0 : s.staff_required,
-      note: s.note,
-      virtual: false
+      note: s.note
     };
   });
-}
-
-/**
- * 枠が1つも無い場所に、既定の枠を仮想的に補う（design.md 4.2.2）。
- *
- * **シートには書き込まない。** ここは読み取りのAPIであり、閲覧者が日付を送るたびに
- * 空の枠が実体として増えていくのは事故のもと。職員の既定勤務時間帯を仮想的に補う
- * `appendStaffDefaultAvailability_` と同じ考え方で、画面の上だけに存在させる。
- *
- * 人を入れた時点で `assignToNewSlot` が本物の枠を作る。そこで初めて行が生まれる。
- *
- * `default_slot_start` / `default_slot_end` のどちらかを空にすると、この補完は止まる。
- */
-function appendDefaultSlots_(slots, date) {
-  const start = getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_START, '');
-  const end = getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_END, '');
-  if (!isValidTimeStr_(start) || !isValidTimeStr_(end) || toMinutes_(start) >= toMinutes_(end)) {
-    return slots;
-  }
-  const required = Number(getConfigValue_(CONFIG_KEY.DEFAULT_SLOT_REQUIRED, 1));
-
-  // 既に枠のある場所には出さない。運用が始まっている場所に空の枠を割り込ませない
-  const used = {};
-  slots.forEach(function (s) { used[s.place_id] = true; });
-
-  const out = slots.slice();
-  readPlaces_().forEach(function (p) {
-    if (!p.active || used[p.id]) return;
-    out.push({
-      id: 'virtual:' + p.id + ':' + date,
-      date: date,
-      place_id: p.id,
-      start_time: start,
-      end_time: end,
-      required_count: isFinite(required) && required >= 0 ? required : 0,
-      staff_required: 0,
-      note: '',
-      virtual: true
-    });
-  });
-  return out;
 }
 
 /** place_id → 表示順（並べ替え用） */
@@ -281,39 +235,17 @@ function resolvePersonId_(personId, byId) {
   return id;
 }
 
-/**
- * 職員の既定可用時間帯を仮想的に補う（design.md 3 availability の注記）。
- *
- * 職員は毎回の可用性入力を求めない運用のため、`availability` に行が無い職員には
- * `_config` の既定勤務時間帯を「その場で」可用とみなして足す。
- * **シートには書き込まない。** 書き込むと既定値を変えたときに過去分が食い違う。
- */
-function appendStaffDefaultAvailability_(availability, people, date) {
-  const start = getConfigValue_(CONFIG_KEY.STAFF_DEFAULT_START, '');
-  const end = getConfigValue_(CONFIG_KEY.STAFF_DEFAULT_END, '');
-  if (!isValidTimeStr_(start) || !isValidTimeStr_(end) || toMinutes_(start) >= toMinutes_(end)) {
-    return availability;
-  }
+/*
+  かつてここには appendStaffDefaultAvailability_ があった。
 
-  const hasOwn = new Set(availability.map(function (a) { return a.person_id; }));
-  const out = availability.slice();
+  申告の無い職員に `_config` の既定勤務時間帯を仮想的に足す仕組みだったが、
+  **職員も登録画面から申告する運用に変えたため廃止した**（登録画面の初期値が
+  `entry_default_start` / `entry_default_end` で入っているので、そのまま送れば同じ結果になる）。
 
-  people.forEach(function (p) {
-    if (p.type !== PERSON_TYPE.STAFF) return;
-    if (trimStr_(p.merged_into)) return;
-    if (hasOwn.has(p.id)) return; // 自分で申告している職員は、その申告を優先する
-    out.push({
-      id: 'virtual:' + p.id + ':' + date,
-      person_id: p.id,
-      date: date,
-      start_time: start,
-      end_time: end,
-      virtual: true
-    });
-  });
-
-  return out;
-}
+  結果として、availability は「本人が申告した行」だけになった。
+  **職員も申告しない限り候補に出ない。** 補完を戻したくなったときは、
+  「仮想の行をシートに書かない」という原則だけは必ず守ること。
+*/
 
 // ---------------------------------------------------------------------------
 // 人の公開用整形

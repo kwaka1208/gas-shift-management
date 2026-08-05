@@ -22,6 +22,7 @@ function setup() {
   });
 
   messages.push(seedConfigDefaults_());
+  messages.push(reportRetiredConfigKeys_());
 
   const token = ensureViewToken_();
   applySheetVisibility_();
@@ -114,6 +115,21 @@ function seedConfigDefaults_() {
   if (keys.length === 0) return '[_config] 既定値は投入済み';
   setConfigValues_(toWrite);
   return '[_config] 既定値を投入: ' + keys.join(', ');
+}
+
+/**
+ * 使わなくなったキーが `_config` に残っていたら知らせる。
+ *
+ * **自動では消さない。** 運用者が値を入れた行を、こちらの都合で黙って消すべきではない。
+ * 残っていても動作には影響しないので、気づけるようにするだけでよい。
+ */
+function reportRetiredConfigKeys_() {
+  const current = getConfig_();
+  const found = CONFIG_RETIRED_KEYS.filter(function (key) {
+    return current[key] !== undefined;
+  });
+  if (found.length === 0) return '[_config] 廃止キーなし';
+  return '[_config] 使わなくなったキーが残っています（消して構いません）: ' + found.join(', ');
 }
 
 /** 閲覧トークンが無ければ発行する。既にあれば維持する（URLを変えない） */

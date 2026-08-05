@@ -89,7 +89,6 @@
    * @param {Array<{start,end}>=} ranges 省略時は直前の日の時間帯を引き継ぐ
    */
   function addDayBlock(date, ranges) {
-    const cfg = state.config;
     const blocks = $('dayList').children;
     const last = blocks.length > 0 ? blocks[blocks.length - 1] : null;
 
@@ -97,11 +96,11 @@
       const lastDate = last ? last.querySelector('.dayDate').value : '';
       date = lastDate ? App.addDays(lastDate, 1) : (BOOT.date || App.todayStr());
     }
-    // 引き継ぐ時間帯。1つ目のブロックだけは表示時間帯を既定にする
+    // 引き継ぐ時間帯。1つ目のブロックだけは _config の既定（entry_default_*）を入れる
     if (!ranges) {
-      ranges = last ? readRangesOf(last) : [{ start: cfg.day_start, end: cfg.day_end }];
+      ranges = last ? readRangesOf(last) : [entryDefaultRange()];
       ranges = ranges.filter(function (r) { return r.start && r.end; });
-      if (ranges.length === 0) ranges = [{ start: cfg.day_start, end: cfg.day_end }];
+      if (ranges.length === 0) ranges = [entryDefaultRange()];
     }
 
     const block = document.createElement('div');
@@ -115,7 +114,6 @@
       '<div class="rangeList"></div>' +
       '<div class="rangeActions">' +
         '<button type="button" class="btn btn--small addRange">＋ 時間帯を追加</button>' +
-        '<button type="button" class="btn btn--small allDay">終日OK</button>' +
       '</div>';
 
     $('dayList').appendChild(block);
@@ -138,12 +136,6 @@
       addRangeRow(block);
     });
 
-    block.querySelector('.allDay').addEventListener('click', function () {
-      block.querySelector('.rangeList').innerHTML = '';
-      addRangeRow(block, cfg.day_start, cfg.day_end);
-      toast('終日（' + cfg.day_start + '〜' + cfg.day_end + '）を入力しました');
-    });
-
     ranges.forEach(function (r) { addRangeRow(block, r.start, r.end); });
     updateDayDeleteButtons();
     return block;
@@ -158,15 +150,29 @@
   }
 
   /**
+   * この画面に最初から入れておく時間帯（`_config` の `entry_default_*`）。
+   *
+   * 一日の全体範囲（`day_start`〜`day_end`）とは別に持つ。
+   * 全体範囲は配置表の横軸を決めるもので、**そのまま出すと申告として広すぎる**ため。
+   * 職員もこの画面から申告するので、職員の既定勤務時間帯もここで兼ねる。
+   */
+  function entryDefaultRange() {
+    const cfg = state.config;
+    const start = cfg.entry_default_start || cfg.day_start;
+    const end = cfg.entry_default_end || cfg.day_end;
+    return { start: start, end: end };
+  }
+
+  /**
    * 時間帯の行を1つ足す。
    * 既定値は「前の行の終了時刻から」。連続で入力するときに打ち直す手間を減らす。
    *
    * 時刻はプルダウンではなく、時・分の直接入力（App.timeFields）。
    */
   function addRangeRow(block, start, end) {
-    const cfg = state.config;
-    const dayStart = toMin(cfg.day_start);
-    const dayEnd = toMin(cfg.day_end);
+    const base = entryDefaultRange();
+    const dayStart = toMin(base.start);
+    const dayEnd = toMin(base.end);
     const list = block.querySelector('.rangeList');
 
     if (!start) {
@@ -199,7 +205,7 @@
       const endVal = App.readTimeFields(endEl);
       if (!startVal || !endVal) return;
       if (toMin(endVal) <= toMin(startVal)) {
-        App.writeTimeFields(endEl, toHHMM(Math.min(toMin(startVal) + 60, 24 * 60 - 1)));
+        App.writeTimeFields(endEl, toHHMM(Math.min(toMin(startVal) + 60, App.TIME_MAX_HOUR * 60 + 59)));
       }
     });
 
@@ -358,7 +364,7 @@
       for (let j = 0; j < d.ranges.length; j++) {
         const r = d.ranges[j];
         if (!r.start || !r.end) {
-          return d.date + ' の時間帯を入力してください（時は0〜23、分は0〜59）。';
+          return d.date + ' の時間帯を入力してください（時は0〜' + App.TIME_MAX_HOUR + '、分は0〜59）。';
         }
         if (toMin(r.end) <= toMin(r.start)) {
           return d.date + ' は終了時刻を開始時刻より後にしてください。';
@@ -398,7 +404,7 @@
 
     const rows = days.map(function (d) {
       const times = d.entries.map(function (e) {
-        return esc(e.start_time) + ' 〜 ' + esc(e.end_time);
+        return esc(App.timeLabel(e.start_time)) + ' 〜 ' + esc(App.timeLabel(e.end_time));
       }).join('<br>');
       return '<div class="receipt__day">' +
         '<div class="receipt__date">' + esc(d.date) +

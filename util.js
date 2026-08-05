@@ -21,7 +21,10 @@ function toMinutes_(hhmm) {
   return Number(parts[0]) * 60 + Number(parts[1]);
 }
 
-/** 0時からの経過分を 'HH:mm' に変換する */
+/**
+ * 0時からの経過分を 'HH:mm' に変換する。
+ * 24時以降は `25:00` のように24時間制の延長で返す（`isValidTimeStr_` 参照）。
+ */
 function toHHMM_(minutes) {
   if (typeof minutes !== 'number' || !isFinite(minutes) || minutes < 0) {
     throw new Error('分の値が不正です: ' + minutes);
@@ -30,9 +33,38 @@ function toHHMM_(minutes) {
   return pad2_(Math.floor(m / 60)) + ':' + pad2_(m % 60);
 }
 
-/** 'HH:mm' 形式か（00:00〜23:59） */
+/**
+ * 'HH:mm' 形式か（`00:00`〜`47:59`）。
+ *
+ * **24時以降は「翌日」を表す**（design.md 5.1）。日をまたぐ枠を1本で表せるように、
+ * 24時間制の延長として扱う。`22:00`〜`26:00` は「その日の22時から翌日2時まで」。
+ *
+ * 上限を47:59（＝翌日の23:59）にしているのは、
+ *   - 日付の列は開始日のまま動かさない設計なので、翌々日まで許すと
+ *     「どの日の枠なのか」が人にもコードにも追えなくなる
+ *   - 打ち間違い（`52:00`）を弾ける
+ * ため。**48以上を通してはいけない。**
+ */
 function isValidTimeStr_(s) {
-  return typeof s === 'string' && /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(s);
+  return typeof s === 'string' && /^(0[0-9]|[1-3][0-9]|4[0-7]):[0-5][0-9]$/.test(s);
+}
+
+/** 時刻として扱える最大の分（47:59） */
+const TIME_MAX_MINUTES_ = 47 * 60 + 59;
+
+/**
+ * 画面・メッセージに出す形にする。24時以降は「翌」を付ける（design.md 5.1）。
+ *   '25:00' → '翌01:00' / '10:00' → '10:00'
+ *
+ * **保存値は変換しない。** シートにはあくまで `25:00` が入る。
+ * ここを通すのは人が読む文字列だけにすること。
+ * クライアント側の同じ処理は `common_script.html` の `timeLabel`。
+ */
+function toDisplayTime_(hhmm) {
+  if (!isValidTimeStr_(hhmm)) return trimStr_(hhmm);
+  const h = Number(hhmm.slice(0, 2));
+  if (h < 24) return hhmm;
+  return '翌' + pad2_(h - 24) + hhmm.slice(2);
 }
 
 /** 時刻が刻み幅（分）に乗っているか。10分刻みの入力検証に使う */

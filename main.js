@@ -8,7 +8,7 @@
  *   ?t=<token>&view=print&d=YYYY-MM-DD … 印刷用配置表（Phase 5）
  *
  * board と admin は同じ画面（index.html）で、boot.admin の真偽だけが違う。
- * 配置表には「場所ごと」と「人ごと」の両方が縦に並ぶ（design.md 4.1）。
+ * 配置表には「役割ごと」と「人ごと」の両方が縦に並ぶ（design.md 4.1）。
  *
  * **これは保護ではない。** トークンは共通なので、閲覧URLを知っていれば管理URLも作れる。
  * 誤操作を防ぐための画面の分離であり、認証ではない（design.md 2）。

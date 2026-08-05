@@ -22,16 +22,45 @@ function runUtilTests() {
   t.eq(toHHMM_(1439), '23:59', 'toHHMM_ 1439');
   t.eq(toHHMM_(toMinutes_('08:10')), '08:10', '往復変換で戻る');
   t.throws(function () { toMinutes_('9:30'); }, 'ゼロ埋めなしは不正');
-  t.throws(function () { toMinutes_('24:00'); }, '24:00 は不正');
   t.throws(function () { toMinutes_(''); }, '空文字は不正');
+
+  // --- 24時以降（翌日） -----------------------------------------------------
+  // 日をまたぐ枠を1本で表すための延長表記。上限は 47:59（翌日の23:59）
+  t.eq(toMinutes_('24:00'), 1440, '★ 24:00 は翌0時（1440分）');
+  t.eq(toMinutes_('26:30'), 1590, '26:30 は翌2時半');
+  t.eq(toMinutes_('47:59'), 2879, '★ 47:59 が上限');
+  t.eq(toHHMM_(1440), '24:00', 'toHHMM_ 1440 は 24:00');
+  t.eq(toHHMM_(2879), '47:59', 'toHHMM_ 2879 は 47:59');
+  t.eq(toHHMM_(toMinutes_('25:10')), '25:10', '24時超も往復変換で戻る');
+  t.throws(function () { toMinutes_('48:00'); }, '★ 48:00 は不正（翌々日は扱わない）');
+  t.throws(function () { toMinutes_('99:00'); }, '99:00 は不正');
+
+  // 22:00-26:00（夜10時〜翌2時）が、日をまたがない区間として正しく扱えること
+  t.eq(durationMinutes_(toMinutes_('22:00'), toMinutes_('26:00')), 240, '★ 22:00-26:00 は4時間');
+  t.ok(overlaps_(toMinutes_('22:00'), toMinutes_('26:00'),
+    toMinutes_('25:00'), toMinutes_('27:00')), '★ 日をまたぐ区間どうしの重なり');
+  t.ok(!overlaps_(toMinutes_('22:00'), toMinutes_('24:00'),
+    toMinutes_('24:00'), toMinutes_('26:00')), '★ 24:00 で接するだけなら重ならない');
+
+  // --- toDisplayTime_ -------------------------------------------------------
+  t.eq(toDisplayTime_('10:00'), '10:00', '24時未満はそのまま');
+  t.eq(toDisplayTime_('23:59'), '23:59', '23:59 はそのまま');
+  t.eq(toDisplayTime_('24:00'), '翌00:00', '★ 24:00 は 翌00:00');
+  t.eq(toDisplayTime_('25:30'), '翌01:30', '★ 25:30 は 翌01:30');
+  t.eq(toDisplayTime_('47:59'), '翌23:59', '47:59 は 翌23:59');
+  t.eq(toDisplayTime_('bogus'), 'bogus', '不正な値は素通しする（例外にしない）');
 
   // --- isValidTimeStr_ / isOnUnit_ -----------------------------------------
   t.ok(isValidTimeStr_('00:00'), '00:00 は妥当');
-  t.ok(!isValidTimeStr_('25:00'), '25:00 は不正');
+  t.ok(isValidTimeStr_('25:00'), '25:00 は妥当（翌日1時）');
+  t.ok(isValidTimeStr_('47:59'), '47:59 は妥当');
+  t.ok(!isValidTimeStr_('48:00'), '48:00 は不正');
+  t.ok(!isValidTimeStr_('50:00'), '50:00 は不正');
   t.ok(!isValidTimeStr_('10:60'), '10:60 は不正');
   t.ok(isOnUnit_('10:10', 10), '10分刻みに乗る');
   t.ok(!isOnUnit_('10:15', 10), '10:15 は10分刻みに乗らない');
   t.ok(isOnUnit_('10:15', 5), '5分刻みには乗る');
+  t.ok(isOnUnit_('26:00', 10), '24時超も刻み判定できる');
 
   // --- overlaps_（受け入れ条件の中核） -------------------------------------
   const a1 = toMinutes_('10:00'), a2 = toMinutes_('11:00');

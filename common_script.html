@@ -125,6 +125,34 @@ const App = (function () {
     return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
   }
 
+  /*
+    時刻は24時間制の延長で持つ。**24時以降は翌日**（`25:00` = 翌日1時）。
+    日をまたぐ枠を1本で表せるようにするためで、上限は `47:59`（翌日の23:59）。
+    サーバー側の定義は util.js の `isValidTimeStr_` / `toDisplayTime_`。
+  */
+
+  /** 時刻として扱える最大の「時」。48以上は日付が追えなくなるので通さない */
+  const TIME_MAX_HOUR = 47;
+
+  /**
+   * 画面に出す形にする。`25:00` → `翌01:00`。
+   *
+   * **保存値は変換しない。** サーバーへ送るのは常に `25:00` の形。
+   * 人が読む文字列を作るときだけ通すこと。
+   */
+  function timeLabel(hhmm) {
+    const s = String(hhmm === null || hhmm === undefined ? '' : hhmm);
+    const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+    if (!m) return s;
+    const h = Number(m[1]);
+    return h < 24 ? s : '翌' + String(h - 24).padStart(2, '0') + ':' + m[2];
+  }
+
+  /** 分（0時からの経過）を画面に出す形にする */
+  function minLabel(min) {
+    return timeLabel(toHHMM(min));
+  }
+
   /** 日付計算は UTC で行う。端末のタイムゾーンでずらさない */
   function addDays(dateStr, n) {
     const p = dateStr.split('-').map(Number);
@@ -152,6 +180,10 @@ const App = (function () {
     プルダウンは選択肢が多くなるほど遠くなり、スマホでは特に辛い。
     数字を打てる人には打たせる方が速いので、2つの数値入力にしている。
     表示時間帯の外の時刻も入力できる（配置表の表示範囲は _config で別に決まる）。
+
+    **時は 0〜47 まで受ける。** 24以上は翌日を指す（`timeLabel`）。
+    入力欄には打った数字がそのまま残る（`25` と打てば `25` のまま）。
+    翌日であることは、欄の下の補助表示と、配置表側の `翌01:00` 表記で示す。
   */
 
   /**
@@ -169,7 +201,8 @@ const App = (function () {
     return '<span class="timeInput' + (o.cls ? ' ' + o.cls : '') + '"' +
       (o.id ? ' id="' + o.id + '"' : '') + '>' +
       '<input type="number" class="timeInput__h" inputmode="numeric" pattern="[0-9]*"' +
-        ' min="0" max="23" step="1" value="' + esc(h) + '" aria-label="' + label + '時">' +
+        ' min="0" max="' + TIME_MAX_HOUR + '" step="1" value="' + esc(h) +
+        '" aria-label="' + label + '時">' +
       '<span class="timeInput__sep">:</span>' +
       '<input type="number" class="timeInput__m" inputmode="numeric" pattern="[0-9]*"' +
         ' min="0" max="59" step="1" value="' + esc(m) + '" aria-label="' + label + '分">' +
@@ -190,7 +223,7 @@ const App = (function () {
     const mn = Number(m);
     if (!isFinite(hn) || !isFinite(mn)) return '';
     if (hn !== Math.floor(hn) || mn !== Math.floor(mn)) return '';
-    if (hn < 0 || hn > 23 || mn < 0 || mn > 59) return '';
+    if (hn < 0 || hn > TIME_MAX_HOUR || mn < 0 || mn > 59) return '';
 
     return String(hn).padStart(2, '0') + ':' + String(mn).padStart(2, '0');
   }
@@ -232,6 +265,9 @@ const App = (function () {
     genderLabel: genderLabel,
     toMin: toMin,
     toHHMM: toHHMM,
+    TIME_MAX_HOUR: TIME_MAX_HOUR,
+    timeLabel: timeLabel,
+    minLabel: minLabel,
     addDays: addDays,
     dowOf: dowOf,
     todayStr: todayStr,

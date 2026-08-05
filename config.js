@@ -158,16 +158,15 @@ const AGE_MAX = 120;
  * view_token / web_app_url はここに書かず、動的に決まる。
  */
 const CONFIG_DEFAULTS = {
+  // 一日の全体の時間範囲。配置表の横軸はこの範囲で描く。
+  // 24時以降は翌日を表すので、深夜までの日は day_end に '26:00' のように書く
   day_start: '10:00',
   day_end: '17:00',
   slot_unit_minutes: '10',
-  staff_default_start: '10:00',
-  staff_default_end: '17:00',
-  // 枠が1つも無い場所に、この時間帯の枠を仮想的に表示する（シートには書かない）。
-  // 開始か終了を空にすると表示しなくなる
-  default_slot_start: '10:00',
-  default_slot_end: '17:00',
-  default_slot_required: '1',
+  // 登録画面（応募フォーム）に最初から入っている時間帯。
+  // 職員もこの画面から申告するため、職員の既定勤務時間帯はここで兼ねる
+  entry_default_start: '10:00',
+  entry_default_end: '17:00',
   public_name_style: 'full'
 };
 
@@ -178,13 +177,31 @@ const CONFIG_KEY = {
   DAY_START: 'day_start',
   DAY_END: 'day_end',
   SLOT_UNIT_MINUTES: 'slot_unit_minutes',
-  STAFF_DEFAULT_START: 'staff_default_start',
-  STAFF_DEFAULT_END: 'staff_default_end',
-  DEFAULT_SLOT_START: 'default_slot_start',
-  DEFAULT_SLOT_END: 'default_slot_end',
-  DEFAULT_SLOT_REQUIRED: 'default_slot_required',
+  ENTRY_DEFAULT_START: 'entry_default_start',
+  ENTRY_DEFAULT_END: 'entry_default_end',
   PUBLIC_NAME_STYLE: 'public_name_style'
 };
+
+/**
+ * 使わなくなった `_config` のキー。
+ *
+ * `seedConfigDefaults_` は行を消さないため、既存のシートには残り続ける。
+ * **消さずに一覧で持っておく**ことで、`setup()` が「もう使っていない」と知らせられる。
+ * 残っていても動作には影響しない。
+ *
+ *   staff_default_*  … 職員の既定勤務時間帯。職員も登録画面から申告する運用に変えたため廃止
+ *   default_slot_*   … 枠が無い場所に破線で出していた「既定の枠」。機能ごと廃止
+ */
+const CONFIG_RETIRED_KEYS = [
+  'staff_default_start',
+  'staff_default_end',
+  'default_slot_start',
+  'default_slot_end',
+  'default_slot_required'
+];
+
+/** 枠の必要人数。1つの枠には1人までなので常にこの値（design.md 6.6） */
+const SLOT_REQUIRED_COUNT = 1;
 
 /** LockService の待機時間（ミリ秒） */
 const LOCK_TIMEOUT_MS = 10000;
