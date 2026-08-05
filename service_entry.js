@@ -35,10 +35,12 @@ const MAX_DAYS_PER_SUBMIT = 31;
  * @param {Object} payload
  *   - name {string}     氏名（必須）
  *   - contact {string}  連絡先（任意）
+ *   - gender {string}   性別（必須。GENDER_VALUES のいずれか）
+ *   - age {number}      年齢（必須。AGE_MIN〜AGE_MAX）
  *   - type {string}     'volunteer' / 'staff'（既定は volunteer）
  *   - days {Array<{date: string, ranges: Array<{start, end}>}>} 日ごとの申告
  *   - operator {string} 代理入力した人の名前（本人入力なら空）
- * @return {{ personId, name, type, days, isNewPerson }}
+ * @return {{ personId, name, gender, age, type, days, isNewPerson }}
  */
 function submitAvailabilityData_(payload) {
   const input = validateEntryInput_(payload || {});
@@ -70,6 +72,9 @@ function submitAvailabilityData_(payload) {
   return {
     personId: person.id,
     name: person.name,
+    // 控えには「今しがた登録した値」を出す。既存の人でも上書き済みなので input と一致する
+    gender: input.gender,
+    age: input.age,
     type: person.type,
     days: days,
     isNewPerson: person.isNew
@@ -95,6 +100,12 @@ function validateEntryInput_(payload) {
 
   const contact = trimStr_(payload.contact);
   if (contact.length > 100) errors.push('連絡先が長すぎます。');
+
+  // 性別・年齢は必須。ただし性別には「回答しない」があり、答えたくない人も先へ進める
+  const gender = trimStr_(payload.gender);
+  if (GENDER_VALUES.indexOf(gender) === -1) errors.push('性別を選んでください。');
+
+  const age = parseAge_(payload.age, errors);
 
   const type = trimStr_(payload.type) === PERSON_TYPE.STAFF
     ? PERSON_TYPE.STAFF
@@ -141,10 +152,36 @@ function validateEntryInput_(payload) {
   return {
     name: name,
     contact: contact,
+    gender: gender,
+    age: age,
     type: type,
     days: days,
     operator: trimStr_(payload.operator)
   };
+}
+
+/**
+ * 年齢を検証して数値に直す。不正なら errors に積んで null を返す。
+ *
+ * 小数や全角は受けない。**「32歳」のような書き方も弾く。**
+ * 数値列に文字が混ざると、シート上で並べ替えたときに静かに壊れるため。
+ */
+function parseAge_(raw, errors) {
+  const s = trimStr_(raw);
+  if (s === '') {
+    errors.push('年齢を入力してください。');
+    return null;
+  }
+  if (!/^[0-9]+$/.test(s)) {
+    errors.push('年齢は半角数字で入力してください。');
+    return null;
+  }
+  const n = Number(s);
+  if (n < AGE_MIN || n > AGE_MAX) {
+    errors.push('年齢は' + AGE_MIN + '〜' + AGE_MAX + 'の間で入力してください。');
+    return null;
+  }
+  return n;
 }
 
 /**
@@ -189,6 +226,10 @@ function parseRanges_(rawRanges, date, unit, errors) {
  * 同一人物とみなすのは **氏名と連絡先の両方が完全に一致** したときだけ。
  * 連絡先が空なら常に新規作成する（同姓同名の別人を勝手に統合しないため）。
  * 表記ゆれの吸収は狙わない。名寄せは管理者が手動で行う（CLAUDE.md）。
+ *
+ * 既存の人が見つかったときは、性別・年齢を**今回の申告で上書きする。**
+ * 年をまたげば年齢は変わるし、打ち間違いを直す手段が応募フォームしか無いため。
+ * 氏名・連絡先・種別は照合の鍵や運用上の設定なので触らない。
  */
 function findOrCreatePerson_(input) {
   if (input.contact) {
@@ -201,6 +242,11 @@ function findOrCreatePerson_(input) {
       // 名寄せ済みなら統合先へ読み替える
       const id = resolvePersonId_(matched[0].id, byId);
       const person = byId.get(id) || matched[0];
+      if (trimStr_(person.gender) !== input.gender || person.age !== input.age) {
+        updateRowsById_(SHEET_DEFS.PEOPLE, [{
+          id: person.id, gender: input.gender, age: input.age
+        }]);
+      }
       return { id: person.id, name: person.name, type: person.type, isNew: false };
     }
   }
@@ -208,6 +254,8 @@ function findOrCreatePerson_(input) {
   const created = insertRows_(SHEET_DEFS.PEOPLE, [{
     name: input.name,
     kana: '',
+    gender: input.gender,
+    age: input.age,
     type: input.type,
     contact: input.contact,
     is_recurring: input.type === PERSON_TYPE.STAFF, // 職員は毎回候補に出す

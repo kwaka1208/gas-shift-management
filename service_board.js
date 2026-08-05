@@ -10,6 +10,8 @@
  * したがって、返してよいのは「配布先の全員に見せてよい情報」だけに限る。
  *   - `contact` / `note` は誰にも返さない。必要なときは people シートを直接見る
  *   - 氏名は `public_name_style` に従って加工する
+ *   - `gender` / `age` は管理画面からの呼び出しにだけ返す。ただし管理画面は
+ *     閲覧URLに `&view=admin` を足せば誰でも開けるので、**秘匿ではなく目隠しである**
  *   - `_config` のうち view_token は絶対に返さない
  *
  * 充足判定（design.md 6.4）と整合性警告（6.5）は Phase 4 で追加する。
@@ -109,8 +111,9 @@ function comparePlaces_(a, b) {
  * データを足したくなったら関数を増やさず、この戻り値に足すこと。
  *
  * @param {string} date 'YYYY-MM-DD'
+ * @param {boolean=} admin 管理画面からの呼び出しなら true（性別・年齢を含める）
  */
-function buildDayBoard_(date) {
+function buildDayBoard_(date, admin) {
   if (!isValidDateStr_(date)) {
     throw new Error('日付の指定が正しくありません。');
   }
@@ -128,7 +131,7 @@ function buildDayBoard_(date) {
     slots: appendDefaultSlots_(slots, date),
     assignments: assignments,
     availability: withVirtual,
-    people: people.map(function (p) { return toPublicPerson_(p, nameStyle); }),
+    people: people.map(function (p) { return toPublicPerson_(p, nameStyle, admin === true); }),
     // TODO(Phase 4): design.md 6.5 の整合性警告をここで組み立てる
     warnings: []
   };
@@ -323,9 +326,14 @@ function appendStaffDefaultAvailability_(availability, people, date) {
  * 閲覧トークンを知っている人は全員が同じ画面を開けるため、連絡先を返すことは
  * 配布先の全員に連絡先を配ることと同じになる（要件 4.5）。
  * 連絡先が必要な場面では、管理者がスプレッドシートの people シートを直接見る。
+ *
+ * 性別・年齢は `admin` のときだけ返す。ただし**これは秘匿ではない。**
+ * 管理画面は閲覧URLに `&view=admin` を足せば誰でも開けるため（main.js 13行目）、
+ * 効果は「閲覧用URLを配った相手の目に触れにくくする」ことに留まる。
+ * 本当に見せてはいけない情報は、`contact` と同じくここで落とすこと。
  */
-function toPublicPerson_(person, nameStyle) {
-  return {
+function toPublicPerson_(person, nameStyle, admin) {
+  const out = {
     id: person.id,
     name: displayName_(person.name, nameStyle),
     kana: person.kana,
@@ -333,6 +341,12 @@ function toPublicPerson_(person, nameStyle) {
     is_recurring: person.is_recurring === true,
     merged_into: person.merged_into
   };
+  if (admin === true) {
+    out.gender = person.gender;
+    // 未登録（列を追加する前に登録された人）は null。画面側で表示を省く
+    out.age = person.age;
+  }
+  return out;
 }
 
 /**

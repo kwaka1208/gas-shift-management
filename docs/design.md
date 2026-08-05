@@ -64,6 +64,17 @@ QRコードを配った相手（＝ボランティア全員とその転送先）
 
 上記のとおり管理者だけを識別する手段が無いため、**`people.contact` と `people.note` はどの画面にも返さない。** サーバー側（`toPublicPerson_`）で落とす。連絡先が必要な場面では、管理者がスプレッドシートの `people` シートを直接参照する。
 
+### 性別・年齢の扱い（目隠しであって秘匿ではない）
+
+`people.gender` と `people.age` は、`getDayBoard(token, date, admin)` の `admin` が true のときだけ返す。
+
+**これは保護ではない。** 上の「管理URL」と同じで、閲覧URLを知っていれば `admin` に true を渡せる。効果は「閲覧用URLを配った相手の目に触れにくくする」ことに留まる。
+
+したがって判断の基準はこうなる。
+
+- **配布先の全員に見られても構わない情報だけを載せる。** 性別・年齢はこの条件を満たすという判断で載せている
+- **本当に見せてはいけない情報は、`contact` と同じく `admin` に関係なく落とす。** `admin` フラグで守ろうとしないこと
+
 ## 3. シート定義
 
 1シート＝1テーブル。1行目がヘッダー（列ID）、2行目以降がデータ。
@@ -115,11 +126,19 @@ QRコードを配った相手（＝ボランティア全員とその転送先）
 | id | string | UUID |
 | name | string | 表示名 |
 | kana | string | 並べ替え用（任意） |
+| gender | string | `male` / `female` / `other` / `undisclosed`。応募フォームでは必須 |
+| age | number | 0〜120。応募フォームでは必須 |
 | type | string | `volunteer` / `staff` |
 | contact | string | 連絡先。**公開ビューには絶対に出さない** |
 | is_recurring | boolean | 継続参加者フラグ。true の人だけ次回以降の候補に自動で出す |
 | merged_into | string | 名寄せ時に統合先の person_id を記録（行は消さない） |
 | note | string | |
+
+`gender` は `type` と揃えて英語コードで保存し、日本語への変換は画面側で行う（サーバー: `config.js` の `GENDER` / `GENDER_VALUES`、クライアント: `common_script.html` の `GENDER_OPTIONS`。**値を足すときは両方直す**）。
+
+`age` の 0〜120 という上限は、打ち間違い（西暦を入れた、桁を余分に打った）を弾くためのもので、参加できる年齢の制限ではない。運用上の可否は人が判断する。
+
+同一人物と判定された再登録（氏名と連絡先が完全一致）では、`gender` / `age` を**今回の申告で上書きする。** 年をまたげば年齢は変わるうえ、本人が打ち間違いを直す手段が応募フォームしか無いため。氏名・連絡先・種別は照合の鍵や運用上の設定なので触らない。
 
 ### `availability`
 
@@ -302,6 +321,7 @@ _config: default_slot_start / default_slot_end / default_slot_required
 - 出すのは**その日に関わりのある人だけ**（申告した人、または割り当てのある人）。継続参加者でも申告が無ければ出さない。空行が並ぶと目的が埋もれる
 - 申告の外に割り当てられている区間は赤で描く（6.5 `no_availability` の予告）
 - `people` に無い `person_id` の割り当ても「(不明な人)」として行を作る。**割り当てを画面から消さない**
+- 管理URLでは氏名の下に性別・年齢を添える（「女性 / 42歳」）。割り当てパネルの候補リスト・割り当て済みリストにも同じ形で出す。**未入力の項目は出さない**（列を追加する前に登録された人がいるため）
 
 - 管理URLでは、**割り当ての帯をタップすると解除できる**。帯は小さく指が触れただけで人が消えると気付けないため、**ここだけは確認を挟む**（割り当てパネルの解除ボタンは即時）
 
@@ -316,7 +336,9 @@ _config: default_slot_start / default_slot_end / default_slot_required
 
 ボランティアがQRコードから開く。**この画面のわかりやすさが参加率に直結する。**
 
-- 入力項目: 名前 / 連絡先 / **入れる日と時間帯（複数日）**
+- 入力項目: 名前 / **性別** / **年齢** / 連絡先 / **入れる日と時間帯（複数日）**
+- 性別と年齢は**必須**。性別には「回答しない」を用意し、答えたくない人も先へ進めるようにする。選択肢は `common_script.html` の `GENDER_OPTIONS` から組み立て、フォームのHTMLに直接書かない（サーバーの `GENDER_VALUES` と食い違わせないため）
+- 性別の初期値は**空（「選択してください」）にする。** 既定で「男性」が入っていると、選んでいないのか選んだ結果なのかを本人も見分けられず、そのまま送信されてしまう
 - **日付ブロックの中に時間帯の行が並ぶ入れ子**。日ごとに都合が違うのが普通なので、日付を1つ選んで終わりにはしない
 
 ```
@@ -454,11 +476,11 @@ warn_staff = staff_required > 0 && staff_count < staff_required
 | 関数 | 引数 | 戻り値 |
 |---|---|---|
 | `getBootstrap(token)` | 閲覧トークン | `{ config, places, templateNames }` |
-| `getDayBoard(token, date)` | | `{ slots, assignments, people, availability, warnings }` |
+| `getDayBoard(token, date, admin)` | `admin` は性別・年齢を返すかどうかだけを切り替える（保護ではない） | `{ slots, assignments, people, availability, warnings }` |
 | `assign(token, slotId, personId)` | 既存の枠へ入れる | `{ assignment }` |
 | `assignToNewSlot(token, payload)` | 日付/場所/開始/終了/人。枠が無ければ作って入れる | `{ slot, slotCreated, assignment }` |
 | `unassign(token, assignmentId)` | | `{ removed: true }` |
-| `submitAvailability(token, payload)` | 名前/連絡先/種別/`days`（日付と時間帯の配列） | `{ personId, name, type, days, isNewPerson }` |
+| `submitAvailability(token, payload)` | 名前/連絡先/性別/年齢/種別/`days`（日付と時間帯の配列） | `{ personId, name, gender, age, type, days, isNewPerson }` |
 | `savePlaces(token, places)` | | `{ places }` |
 | `saveSlots(token, date, slots)` | 1日分をまとめて保存 | `{ slots }` |
 | `generateSlots(token, templateName, fromDate, toDate)` | | `{ created, skipped }` |
@@ -487,7 +509,9 @@ warn_staff = staff_required > 0 && staff_count < staff_required
 - `availability`: 指定日の全件（職員の既定分を仮想的に補ったもの）
 - `warnings`: 6.5 の判定結果
 
-**`contact` と `note` は誰にも返さない**（本節冒頭の「連絡先の非公開」）。氏名は `public_name_style` に従って加工する。
+**`contact` と `note` は誰にも返さない**（2章の「連絡先の非公開」）。氏名は `public_name_style` に従って加工する。
+
+`people` の `gender` / `age` は `admin=true` のときだけ含める（2章の「性別・年齢の扱い」）。**列を追加する前に登録された人は未入力なので、値が無い前提で描くこと。**
 
 ## 8. セットアップ
 

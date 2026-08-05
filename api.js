@@ -119,13 +119,18 @@ function getBootstrap(token) {
  * 指定日の描画に必要な全データを1回で返す。
  * 候補者の絞り込みはクライアント側で行う（サーバー往復を増やさない）。
  *
+ * `admin` は性別・年齢を返すかどうかだけを切り替える。
+ * **これは保護ではない。** 閲覧トークンを知っていれば true を渡せる（main.js 13行目と
+ * 同じ水準で、画面を分けるためのもの）。秘匿が要る情報はここに載せないこと。
+ *
  * @param {string} token 閲覧トークン
  * @param {string} date 'YYYY-MM-DD'
+ * @param {boolean=} admin 管理画面からの呼び出しなら true
  */
-function getDayBoard(token, date) {
+function getDayBoard(token, date, admin) {
   return handle_('getDayBoard', function () {
     requireViewToken_(token);
-    return buildDayBoard_(date);
+    return buildDayBoard_(date, admin === true);
   });
 }
 

@@ -89,7 +89,7 @@
 
     Promise.all([
       call('getBootstrap', state.token),
-      call('getDayBoard', state.token, state.date)
+      call('getDayBoard', state.token, state.date, state.adminMode)
     ]).then(function (res) {
       applyBootstrap(res[0]);
       applyDayBoard(res[1]);
@@ -130,7 +130,7 @@
     $('loading').textContent = '読み込んでいます…';
     $('loading').hidden = false;
     $('sections').hidden = true;
-    return call('getDayBoard', state.token, date).then(function (data) {
+    return call('getDayBoard', state.token, date, state.adminMode).then(function (data) {
       applyDayBoard(data);
       $('datePicker').value = state.date;
       $('loading').hidden = true;
@@ -495,9 +495,12 @@
       ? '<small class="res__idle">空き</small>'
       : '<small>' + loadLabel(row.busyMin) + ' / ' + loadLabel(row.freeMin) + '</small>';
 
+    const meta = personMeta(person);
+
     return '<div class="board__row">' +
       '<div class="board__place">' +
         esc(person.name) + (person.type === 'staff' ? '<small>職員</small>' : '') +
+        (meta ? '<small>' + esc(meta) + '</small>' : '') +
         note +
         (row.outside > 0 ? '<small class="res__warn">申告外 ' + row.outside + '件</small>' : '') +
       '</div>' +
@@ -878,6 +881,24 @@
     return p ? p.name : '(不明な人)';
   }
 
+  /**
+   * 性別・年齢の表示（例: 「女性 / 42歳」）。無ければ空文字。
+   *
+   * サーバーは管理画面からの呼び出しにだけ gender / age を載せてくるので、
+   * ここで adminMode を見る必要は無い。閲覧画面では単に空文字になる。
+   * 列を追加する前に登録された人は未入力なので、**あるものだけを出す。**
+   */
+  function personMeta(person) {
+    if (!person) return '';
+    const parts = [];
+    const gender = App.genderLabel(person.gender);
+    if (gender) parts.push(gender);
+    if (person.age !== null && person.age !== undefined && person.age !== '') {
+      parts.push(person.age + '歳');
+    }
+    return parts.join(' / ');
+  }
+
   function isStaff(personId) {
     const p = personOf(personId);
     return !!p && p.type === 'staff';
@@ -1103,8 +1124,10 @@
     const rows = assigned.map(function (a) {
       // 送信中の行（楽観的更新で先に置いたもの）はまだ解除できない
       const pending = a.id.indexOf('tmp:') === 0;
+      const meta = personMeta(personOf(a.person_id));
       return '<li class="pRow pRow--assigned">' +
-        '<span class="pName">' + esc(personName(a.person_id)) + '</span>' +
+        '<span class="pName">' + esc(personName(a.person_id)) +
+          (meta ? '<small class="pMeta">' + esc(meta) + '</small>' : '') + '</span>' +
         '<span class="pTag' + (isStaff(a.person_id) ? ' pTag--staff' : '') + '">' +
           (isStaff(a.person_id) ? '職員' : 'ボランティア') + '</span>' +
         (pending
@@ -1130,7 +1153,7 @@
   /** 候補者1行。押すと枠の時間そのままで割り当てる */
   function candidateRowHtml(row) {
     return pickRowHtml('data-assign="' + esc(row.person.id) + '"',
-      row.person.name, '本日 ' + loadLabel(row.load));
+      row.person, '本日 ' + loadLabel(row.load));
   }
 
   /** 部分可用の1行。押すと「入れる時間だけ」の枠を作る画面へ進む */
@@ -1139,12 +1162,18 @@
       'data-pick="' + esc(row.person.id) + '"' +
       ' data-start="' + esc(row.preset_start) + '"' +
       ' data-end="' + esc(row.preset_end) + '"',
-      row.person.name, row.ranges + ' のみ');
+      row.person, row.ranges + ' のみ');
   }
 
-  function pickRowHtml(attrs, name, note) {
+  /**
+   * 押して選べる人の1行。
+   * 氏名の下に性別・年齢を添える（管理画面のときだけサーバーが載せてくる）。
+   */
+  function pickRowHtml(attrs, person, note) {
+    const meta = personMeta(person);
     return '<li><button type="button" class="pRow pRow--pick" ' + attrs + '>' +
-      '<span class="pName">' + esc(name) + '</span>' +
+      '<span class="pName">' + esc(person.name) +
+        (meta ? '<small class="pMeta">' + esc(meta) + '</small>' : '') + '</span>' +
       '<span class="pLoad">' + esc(note) + '</span>' +
       '<span class="pAdd">＋</span>' +
     '</button></li>';
@@ -1320,7 +1349,7 @@
       'data-pick="' + esc(row.person.id) + '"' +
       ' data-start="' + esc(row.preset_start) + '"' +
       ' data-end="' + esc(row.preset_end) + '"',
-      row.person.name, row.ranges);
+      row.person, row.ranges);
   }
 
   /**

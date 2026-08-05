@@ -30,6 +30,7 @@
   function boot() {
     call('getBootstrap', state.token).then(function (data) {
       state.config = data.config;
+      setupGenderOptions();
       setupProxyFields();
       addDayBlock(BOOT.date || App.todayStr());
       $('loading').hidden = true;
@@ -37,6 +38,20 @@
     }).catch(function (e) {
       $('loading').textContent = e.message;
     });
+  }
+
+  /**
+   * 性別の選択肢を組み立てる。
+   *
+   * **先頭は空の選択肢にする。** 既定で「男性」が入っていると、選んでいないのか
+   * 選んだ結果なのかを本人も見分けられず、そのまま送信されてしまう。
+   */
+  function setupGenderOptions() {
+    $('f_gender').innerHTML =
+      '<option value="">選択してください</option>' +
+      App.GENDER_OPTIONS.map(function (o) {
+        return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>';
+      }).join('');
   }
 
   /**
@@ -240,6 +255,8 @@
     const payload = {
       name: $('f_name').value,
       contact: $('f_contact').value,
+      gender: $('f_gender').value,
+      age: $('f_age').value,
       type: state.proxy ? $('f_type').value : 'volunteer',
       days: readDays(),
       operator: state.proxy && $('f_operator') ? $('f_operator').value : ''
@@ -249,6 +266,19 @@
     if (!payload.name.trim()) {
       showError('お名前を入力してください。');
       $('f_name').focus();
+      return;
+    }
+
+    if (!payload.gender) {
+      showError('性別を選んでください。');
+      $('f_gender').focus();
+      return;
+    }
+
+    const ageProblem = findAgeProblem(payload.age);
+    if (ageProblem) {
+      showError(ageProblem);
+      $('f_age').focus();
       return;
     }
 
@@ -298,6 +328,19 @@
 
   function delay(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  /**
+   * 年齢の不備。無ければ null。
+   * サーバー側（service_entry.js parseAge_）と同じ条件にしておく。
+   */
+  function findAgeProblem(raw) {
+    const s = String(raw || '').trim();
+    if (s === '') return '年齢を入力してください。';
+    if (!/^[0-9]+$/.test(s)) return '年齢は半角数字で入力してください。';
+    const n = Number(s);
+    if (n < 0 || n > 120) return '年齢は0〜120の間で入力してください。';
+    return null;
   }
 
   /** 最初に見つかった入力の不備。無ければ null */
@@ -370,6 +413,8 @@
         '<dl class="receipt__list">' +
           '<dt>お名前</dt><dd>' + esc(data.name) +
             (data.type === 'staff' ? '（職員）' : '') + '</dd>' +
+          '<dt>性別・年齢</dt><dd>' + esc(App.genderLabel(data.gender)) +
+            ' / ' + esc(data.age) + '歳</dd>' +
           '<dt>入れる日と時間帯（' + days.length + '日）</dt>' +
           '<dd>' + rows + '</dd>' +
         '</dl>' +
@@ -402,6 +447,8 @@
     if (!opts.keepPerson) {
       $('f_name').value = '';
       $('f_contact').value = '';
+      $('f_gender').value = '';
+      $('f_age').value = '';
       if (state.proxy) $('f_type').value = 'volunteer';
     }
 

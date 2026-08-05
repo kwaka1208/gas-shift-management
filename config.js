@@ -65,6 +65,8 @@ const SHEET_DEFS = {
       { id: 'id', type: 'string' },
       { id: 'name', type: 'string' },
       { id: 'kana', type: 'string' },
+      { id: 'gender', type: 'string' },
+      { id: 'age', type: 'number' },
       { id: 'type', type: 'string' },
       { id: 'contact', type: 'string' },
       { id: 'is_recurring', type: 'boolean' },
@@ -127,6 +129,28 @@ const PERSON_TYPE = {
   VOLUNTEER: 'volunteer',
   STAFF: 'staff'
 };
+
+/**
+ * 性別。`type` と揃えて英語コードで保存し、日本語への変換は画面側で行う
+ * （クライアント側の対応表は common_script.html の GENDER_OPTIONS）。
+ */
+const GENDER = {
+  MALE: 'male',
+  FEMALE: 'female',
+  OTHER: 'other',
+  UNDISCLOSED: 'undisclosed'
+};
+
+/** 受け付ける性別の値。ここに無い値は登録時に弾く */
+const GENDER_VALUES = [GENDER.MALE, GENDER.FEMALE, GENDER.OTHER, GENDER.UNDISCLOSED];
+
+/**
+ * 受け付ける年齢の範囲。
+ * 打ち間違い（西暦を入れた、桁を余分に打った）を弾くための上限で、
+ * 参加できる年齢の制限ではない。運用上の可否は人が判断する。
+ */
+const AGE_MIN = 0;
+const AGE_MAX = 120;
 
 /**
  * `_config` の既定値。

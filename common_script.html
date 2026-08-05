@@ -78,6 +78,26 @@ const App = (function () {
     return (BOOT.baseUrl || '') + '?' + q;
   }
 
+  /*
+    性別。シートには英語コードで保存し、画面に出すときだけ日本語へ直す
+    （サーバー側の定義は config.js の GENDER / GENDER_VALUES。値を足すときは両方直す）。
+
+    応募フォームの選択肢と配置表の表示を、この1か所から作る。
+    片方だけ直して表示が食い違う、という壊れ方を避けるため。
+  */
+  const GENDER_OPTIONS = [
+    { value: 'male', label: '男性' },
+    { value: 'female', label: '女性' },
+    { value: 'other', label: 'その他' },
+    { value: 'undisclosed', label: '回答しない' }
+  ];
+
+  /** 保存値 → 表示名。未登録・不明な値は空文字（表示しない） */
+  function genderLabel(value) {
+    const hit = GENDER_OPTIONS.filter(function (o) { return o.value === value; })[0];
+    return hit ? hit.label : '';
+  }
+
   /** HTML エスケープ。テンプレートリテラルに値を差し込む前に必ず通す */
   function esc(s) {
     return String(s === null || s === undefined ? '' : s)
@@ -197,6 +217,8 @@ const App = (function () {
     call: call,
     appUrl: appUrl,
     esc: esc,
+    GENDER_OPTIONS: GENDER_OPTIONS,
+    genderLabel: genderLabel,
     toMin: toMin,
     toHHMM: toHHMM,
     addDays: addDays,
