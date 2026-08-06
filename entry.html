@@ -39,6 +39,18 @@
       </div>
 
       <!--
+        ふりがなは任意。並べ替えと検索に使うだけなので、**必須にして入力を止めない。**
+        漢字を変換して確定すると、その読みが自動で入る（entry_script.html の setupKanaAutoFill）。
+        自動入力はIMEの挙動に依存する best-effort なので、必ず手で直せるようにしておくこと。
+      -->
+      <div class="field">
+        <label for="f_kana">ふりがな</label>
+        <input type="text" id="f_kana" maxlength="50" autocomplete="off"
+               placeholder="やまだ たろう">
+        <p class="hint">お名前を漢字で入力すると自動で入ります。違っていたら直してください。</p>
+      </div>
+
+      <!--
         性別・年齢は必須。選択肢は common_script.html の GENDER_OPTIONS から組み立てる
         （サーバー側の GENDER_VALUES と食い違わせないため、ここには直接書かない）。
       -->
@@ -54,10 +66,16 @@
         </div>
       </div>
 
+      <!--
+        メールアドレスは任意だが、入力があれば形式を確かめる（entry_script.html / util.js）。
+        type="email" にすると、送信時にブラウザ標準の吹き出しが出て
+        画面上部のエラー表示（.formError）と二重になるため、type は text のままにし、
+        inputmode でキーボードだけ切り替える。
+      -->
       <div class="field">
-        <label for="f_contact">連絡先</label>
-        <input type="text" id="f_contact" maxlength="100" autocomplete="tel"
-               placeholder="メールアドレス">
+        <label for="f_contact">メールアドレス</label>
+        <input type="text" id="f_contact" maxlength="100" autocomplete="email"
+               inputmode="email" placeholder="yamada@example.com">
         <p class="hint">シフトが決まりましたらメールでお知らせします</p>
       </div>
 
@@ -71,11 +89,19 @@
           （例: 22:00〜26:00 は「夜10時から翌朝2時まで」）</p>
       </div>
 
+      <p class="hint">ご入力いただいた個人情報は、令和8年熊本地震の被災者支援活動およびこれに付随する連絡・手続き以外の目的には使用いたしません。</p>
+
       <button type="submit" class="btn btn--primary btn--block" id="submitBtn">この内容で登録する</button>
     </form>
 
     <!-- 送信後の控え -->
     <div id="receipt" hidden></div>
+
+    <!-- 運営者。フォームと控えのどちらの状態でも見えるよう form の外に置く -->
+    <footer class="pageFooter">
+      <p class="pageFooter__label">運営者</p>
+      <p class="pageFooter__org">社会福祉法人　八代ナザレ園</p>
+    </footer>
   </div>
 
   <div class="toast" id="toast" hidden></div>

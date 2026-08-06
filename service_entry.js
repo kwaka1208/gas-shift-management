@@ -34,13 +34,14 @@ const MAX_DAYS_PER_SUBMIT = 31;
  *
  * @param {Object} payload
  *   - name {string}     氏名（必須）
- *   - contact {string}  連絡先（任意）
+ *   - kana {string}     ふりがな（任意。並べ替え・検索にしか使わない）
+ *   - contact {string}  メールアドレス（任意。入力があれば形式を確かめる）
  *   - gender {string}   性別（必須。GENDER_VALUES のいずれか）
  *   - age {number}      年齢（必須。AGE_MIN〜AGE_MAX）
  *   - type {string}     'volunteer' / 'staff'（既定は volunteer）
  *   - days {Array<{date: string, ranges: Array<{start, end}>}>} 日ごとの申告
  *   - operator {string} 代理入力した人の名前（本人入力なら空）
- * @return {{ personId, name, gender, age, type, days, isNewPerson }}
+ * @return {{ personId, name, kana, gender, age, type, days, isNewPerson }}
  */
 function submitAvailabilityData_(payload) {
   const input = validateEntryInput_(payload || {});
@@ -72,6 +73,7 @@ function submitAvailabilityData_(payload) {
   return {
     personId: person.id,
     name: person.name,
+    kana: person.kana,
     // 控えには「今しがた登録した値」を出す。既存の人でも上書き済みなので input と一致する
     gender: input.gender,
     age: input.age,
@@ -98,8 +100,23 @@ function validateEntryInput_(payload) {
   if (!name) errors.push('お名前を入力してください。');
   if (name.length > 50) errors.push('お名前が長すぎます。');
 
+  /*
+    ふりがなは任意。**中身の文字種は問わない。**
+    並べ替えと検索にしか使わない列なので、ローマ字で書かれても実害は無い。
+    ここで弾くと「読み方を書けないせいで登録できない人」が出るほうが損失が大きい。
+  */
+  const kana = trimStr_(payload.kana);
+  if (kana.length > 50) errors.push('ふりがなが長すぎます。');
+
+  /*
+    メールアドレスは任意。ただし入力があれば形式を確かめる。
+    連絡できない文字列が入っていても、送るまで誰も気付けないため。
+  */
   const contact = trimStr_(payload.contact);
-  if (contact.length > 100) errors.push('連絡先が長すぎます。');
+  if (contact.length > 100) errors.push('メールアドレスが長すぎます。');
+  else if (contact && !isValidEmail_(contact)) {
+    errors.push('メールアドレスの形を確認してください。（例: yamada@example.com）');
+  }
 
   // 性別・年齢は必須。ただし性別には「回答しない」があり、答えたくない人も先へ進める
   const gender = trimStr_(payload.gender);
@@ -151,6 +168,7 @@ function validateEntryInput_(payload) {
 
   return {
     name: name,
+    kana: kana,
     contact: contact,
     gender: gender,
     age: age,
@@ -229,6 +247,8 @@ function parseRanges_(rawRanges, date, unit, errors) {
  *
  * 既存の人が見つかったときは、性別・年齢を**今回の申告で上書きする。**
  * 年をまたげば年齢は変わるし、打ち間違いを直す手段が応募フォームしか無いため。
+ * ふりがなも同じ理由で上書きするが、**入力があるときだけ。**
+ * 空で送られたからといって、管理者が入れたふりがなを消してよい理由にはならない。
  * 氏名・連絡先・種別は照合の鍵や運用上の設定なので触らない。
  */
 function findOrCreatePerson_(input) {
@@ -242,18 +262,20 @@ function findOrCreatePerson_(input) {
       // 名寄せ済みなら統合先へ読み替える
       const id = resolvePersonId_(matched[0].id, byId);
       const person = byId.get(id) || matched[0];
-      if (trimStr_(person.gender) !== input.gender || person.age !== input.age) {
+      const kana = input.kana || trimStr_(person.kana);
+      if (trimStr_(person.gender) !== input.gender || person.age !== input.age ||
+          trimStr_(person.kana) !== kana) {
         updateRowsById_(SHEET_DEFS.PEOPLE, [{
-          id: person.id, gender: input.gender, age: input.age
+          id: person.id, kana: kana, gender: input.gender, age: input.age
         }]);
       }
-      return { id: person.id, name: person.name, type: person.type, isNew: false };
+      return { id: person.id, name: person.name, kana: kana, type: person.type, isNew: false };
     }
   }
 
   const created = insertRows_(SHEET_DEFS.PEOPLE, [{
     name: input.name,
-    kana: '',
+    kana: input.kana,
     gender: input.gender,
     age: input.age,
     type: input.type,
@@ -263,7 +285,9 @@ function findOrCreatePerson_(input) {
     note: ''
   }])[0];
 
-  return { id: created.id, name: created.name, type: created.type, isNew: true };
+  return {
+    id: created.id, name: created.name, kana: created.kana, type: created.type, isNew: true
+  };
 }
 
 // ---------------------------------------------------------------------------

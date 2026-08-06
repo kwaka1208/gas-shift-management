@@ -232,6 +232,22 @@ function trimStr_(v) {
   return v === null || v === undefined ? '' : String(v).trim();
 }
 
+/**
+ * メールアドレスとして扱える形か。
+ *
+ * **わざと緩い。** RFC どおりに書ける正規表現は存在せず、厳しくするほど
+ * 「実在するのに登録できない人」が出る。ここで止めたいのは
+ * 「電話番号を書いた」「@ を打ち忘れた」といった、送っても届かないと分かる形だけ。
+ *
+ * 画面側にも同じ判定がある（common_script.html の `isValidEmail`）。
+ * **片方だけ直さないこと。**
+ */
+function isValidEmail_(s) {
+  const v = trimStr_(s);
+  if (v === '' || v.length > 100) return false;
+  return /^[^\s@,]+@[^\s@,]+\.[^\s@,.]+$/.test(v);
+}
+
 /** HTML エスケープ。画面に値を差し込む前に必ず通す */
 function escapeHtml_(s) {
   return trimStr_(s)

@@ -32,6 +32,7 @@
       state.config = data.config;
       setupGenderOptions();
       setupProxyFields();
+      setupKanaAutoFill();
       addDayBlock(BOOT.date || App.todayStr());
       $('loading').hidden = true;
       $('entryForm').hidden = false;
@@ -64,6 +65,111 @@
     if (!state.proxy) return;
     $('pageTitle').textContent = '代理で登録する';
     $('typeField').hidden = false;
+  }
+
+  // --------------------------------------------------- ふりがなの自動入力
+
+  /*
+    漢字を変換して確定したときに、その「読み」をふりがな欄へ入れる。
+
+    IMEの変換イベントから拾う。
+      compositionstart  … 変換の開始
+      compositionupdate … 変換中の文字列。**変換前はかな、変換後は漢字**になるので、
+                          かなだけの状態を覚えておく（最後のかな＝その語の読み）
+      compositionend    … 確定。覚えておいた読みを積み足す
+
+    **IMEの実装に依存する best-effort。** 拾えない環境（貼り付け、一部のスマホIME）では
+    何も入らないだけで、手入力は妨げない。ふりがなを人が触ったらそこで追従をやめる
+    （自動入力が人の訂正を上書きするのが、いちばん困る壊れ方）。
+  */
+
+  const kanaAuto = {
+    confirmed: '',   // 確定済みの読み
+    reading: '',     // 変換中に見えたかな（最後のものが読み）
+    composing: false,
+    broken: false,   // IMEを通さない編集が入り、読みと対応が取れなくなった
+    touched: false,  // ふりがな欄を人が編集した
+    lastName: ''
+  };
+
+  /** ひらがな・カタカナ・長音・空白だけでできているか（＝読みとして使えるか） */
+  function isKanaOnly(s) {
+    return typeof s === 'string' && s !== '' && /^[ぁ-んァ-ヶーｦ-ﾟ゛゜\s]+$/.test(s);
+  }
+
+  function applyKana() {
+    if (kanaAuto.touched) return;
+    $('f_kana').value = App.toHiragana(kanaAuto.confirmed);
+  }
+
+  function resetKanaAutoFill() {
+    kanaAuto.confirmed = '';
+    kanaAuto.reading = '';
+    kanaAuto.composing = false;
+    kanaAuto.broken = false;
+    kanaAuto.touched = false;
+    kanaAuto.lastName = '';
+  }
+
+  function setupKanaAutoFill() {
+    const nameEl = $('f_name');
+    const kanaEl = $('f_kana');
+
+    kanaEl.addEventListener('input', function () { kanaAuto.touched = true; });
+
+    nameEl.addEventListener('compositionstart', function () {
+      kanaAuto.composing = true;
+      kanaAuto.reading = '';
+    });
+
+    nameEl.addEventListener('compositionupdate', function (e) {
+      if (isKanaOnly(e.data)) kanaAuto.reading = e.data;
+    });
+
+    nameEl.addEventListener('compositionend', function (e) {
+      kanaAuto.composing = false;
+      // 変換せずに確定したときは、確定した文字そのものが読み
+      const reading = kanaAuto.reading || (isKanaOnly(e.data) ? e.data : '');
+      kanaAuto.reading = '';
+      if (reading) {
+        if (!kanaAuto.broken) kanaAuto.confirmed += reading;
+      } else {
+        kanaAuto.broken = true; // 読みを拾えなかった。以降は積み足さない
+      }
+      kanaAuto.lastName = nameEl.value;
+      applyKana();
+    });
+
+    nameEl.addEventListener('input', function (e) {
+      if (e.isComposing || kanaAuto.composing) return; // 変換中は compositionend で扱う
+
+      const v = nameEl.value;
+      if (v === '') { // 名前を消したら最初からやり直せるようにする
+        resetKanaAutoFillKeepingTouched();
+        applyKana();
+        return;
+      }
+      if (v !== kanaAuto.lastName) {
+        // 姓と名の間の空白は、IMEを通さずに入ることが多い。ここで追従をやめると
+        // 「山田 太郎」の**名の読みだけ入らない**という一番ありがちな失敗になる
+        const added = v.indexOf(kanaAuto.lastName) === 0 ? v.slice(kanaAuto.lastName.length) : null;
+        if (added !== null && /^[\s　]+$/.test(added)) {
+          if (!kanaAuto.broken) kanaAuto.confirmed += added;
+          applyKana();
+        } else {
+          // IMEを通さない編集（削除・貼り付け・英数字）。読みと対応が取れないのでやめる
+          kanaAuto.broken = true;
+        }
+      }
+      kanaAuto.lastName = v;
+    });
+  }
+
+  /** 名前を消したときの初期化。**人が触った印だけは残す**（勝手に上書きし直さない） */
+  function resetKanaAutoFillKeepingTouched() {
+    const touched = kanaAuto.touched;
+    resetKanaAutoFill();
+    kanaAuto.touched = touched;
   }
 
   // ------------------------------------------------------- 日付と時間帯
@@ -264,6 +370,7 @@
 
     const payload = {
       name: $('f_name').value,
+      kana: $('f_kana').value,
       contact: $('f_contact').value,
       gender: $('f_gender').value,
       age: $('f_age').value,
@@ -282,6 +389,14 @@
     if (!payload.gender) {
       showError('性別を選んでください。');
       $('f_gender').focus();
+      return;
+    }
+
+    // メールアドレスは任意。**入力があるときだけ**形を確かめる
+    if (payload.contact.trim() && !App.isValidEmail(payload.contact)) {
+      showError('メールアドレスの形を確認してください。（例: yamada@example.com）\n' +
+        'メールでの連絡が不要な場合は、空のままでも登録できます。');
+      $('f_contact').focus();
       return;
     }
 
@@ -422,6 +537,7 @@
         '<p class="receipt__badge">登録できました</p>' +
         '<dl class="receipt__list">' +
           '<dt>お名前</dt><dd>' + esc(data.name) +
+            (data.kana ? '（' + esc(data.kana) + '）' : '') +
             (data.type === 'staff' ? '（職員）' : '') + '</dd>' +
           '<dt>性別・年齢</dt><dd>' + esc(App.genderLabel(data.gender)) +
             ' / ' + esc(data.age) + '歳</dd>' +
@@ -456,10 +572,12 @@
   function backToForm(opts) {
     if (!opts.keepPerson) {
       $('f_name').value = '';
+      $('f_kana').value = '';
       $('f_contact').value = '';
       $('f_gender').value = '';
       $('f_age').value = '';
       if (state.proxy) $('f_type').value = 'volunteer';
+      resetKanaAutoFill(); // 別の人を入力するので、読みの積み上げも捨てる
     }
 
     $('dayList').innerHTML = '';

@@ -129,6 +129,30 @@ const App = (function () {
     return hit ? hit.label : '';
   }
 
+  /**
+   * メールアドレスとして扱える形か。
+   *
+   * **サーバー側（util.js の `isValidEmail_`）と同じ判定にしてある。**
+   * 片方だけ直すと、画面では通るのに送信すると弾かれる（またはその逆）ことになる。
+   * わざと緩い判定にしている理由はサーバー側のコメントを参照。
+   */
+  function isValidEmail(s) {
+    const v = String(s === null || s === undefined ? '' : s).trim();
+    if (v === '' || v.length > 100) return false;
+    return /^[^\s@,]+@[^\s@,]+\.[^\s@,.]+$/.test(v);
+  }
+
+  /**
+   * カタカナをひらがなに直す。長音（ー）と記号はそのまま残す。
+   * ふりがなの自動入力で使う（`kana` 列はひらがなに揃えて並べ替えに使うため）。
+   */
+  function toHiragana(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/[ァ-ヶ]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0x60);
+      });
+  }
+
   /** HTML エスケープ。テンプレートリテラルに値を差し込む前に必ず通す */
   function esc(s) {
     return String(s === null || s === undefined ? '' : s)
@@ -285,6 +309,8 @@ const App = (function () {
     PLACE_COLOR_OPTIONS: PLACE_COLOR_OPTIONS,
     genderOption: genderOption,
     genderLabel: genderLabel,
+    isValidEmail: isValidEmail,
+    toHiragana: toHiragana,
     toMin: toMin,
     toHHMM: toHHMM,
     TIME_MAX_HOUR: TIME_MAX_HOUR,

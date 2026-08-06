@@ -144,6 +144,20 @@ function runUtilTests() {
   t.eq(dateRange_('2026-08-04', '2026-08-04').length, 1, '同日は1件');
   t.eq(dateRange_('2026-08-06', '2026-08-04').length, 0, '逆順は空');
 
+  // --- メールアドレス -------------------------------------------------------
+  // 判定はわざと緩い（isValidEmail_ のコメント）。止めたいのは「送っても届かない形」だけ
+  t.ok(isValidEmail_('yamada@example.com'), '普通のアドレス');
+  t.ok(isValidEmail_('taro.yamada+vol@example.co.jp'), 'ドットと+を含む');
+  t.ok(isValidEmail_('  yamada@example.com  '), '前後の空白は落として判定する');
+  t.ok(!isValidEmail_(''), '空文字は不正（任意項目かどうかは呼び出し側の判断）');
+  t.ok(!isValidEmail_('090-1234-5678'), '★ 電話番号は不正');
+  t.ok(!isValidEmail_('yamada.example.com'), '@ が無いのは不正');
+  t.ok(!isValidEmail_('yamada@example'), 'ドメインにドットが無いのは不正');
+  t.ok(!isValidEmail_('yamada@example.'), '末尾がドットは不正');
+  t.ok(!isValidEmail_('yamada @example.com'), '空白を含むのは不正');
+  t.ok(!isValidEmail_('a@b.com,c@d.com'), '★ 複数書きは不正（1件しか送れない）');
+  t.ok(!isValidEmail_('a@' + 'x'.repeat(100) + '.com'), '100文字超は不正');
+
   // --- 汎用 -----------------------------------------------------------------
   t.eq(pad2_(3), '03', 'pad2_');
   t.eq(pad2_(12), '12', 'pad2_ 2桁');
