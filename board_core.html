@@ -1,0 +1,273 @@
+<script>
+/*
+  board_core.html … 配置表（index）と印刷ビュー（print）が共有する計算
+
+  ここに置くのは「同じデータから同じ答えが出るべき計算」だけ。
+  画面に出す文字列の組み立てや、クリックの扱いは持ち込まない（それぞれの画面で違うため）。
+
+  **共有する理由。** 印刷したものと画面が食い違うと、紙を持って現場に立つ人が困る。
+  段の振り分け（assignLanes）や申告外の判定（coveredByAny）を2か所に書くと、
+  片方だけ直したときに静かにずれる。
+
+  common_script.html（App）には置かない。あちらは応募フォームとも共有するファイルで、
+  配置表しか使わない計算を混ぜると、応募フォームが何に依存しているのか分からなくなる。
+
+  依存は App のみ。DOM には触らない。
+*/
+const Board = (function () {
+  'use strict';
+
+  const toMin = App.toMin;
+  const tl = App.timeLabel;
+  const ml = App.minLabel;
+  const esc = App.esc;
+
+  // ------------------------------------------------------------ 区間の計算
+
+  function byStart(a, b) { return a.start - b.start || a.end - b.end; }
+
+  /**
+   * 重なりを取り除いた合計分数。二重に数えないための畳み込み。
+   *
+   * **画面には出さない。** 並べ替え（割り当ての少ない人を上に）と
+   * 「空き」の判定にだけ使う。1人が同じ日に複数行を持てるため、
+   * 単純に足すと重なった分を二重に数えてしまう。
+   */
+  function totalMinutes(ranges) {
+    const sorted = ranges.slice().sort(byStart);
+    let total = 0;
+    let cur = null;
+    sorted.forEach(function (r) {
+      if (cur && r.start <= cur.end) {
+        if (r.end > cur.end) { total += r.end - cur.end; cur.end = r.end; }
+      } else {
+        total += r.end - r.start;
+        cur = { start: r.start, end: r.end };
+      }
+    });
+    return total;
+  }
+
+  /** その割り当てが、申告のどれかに収まっているか */
+  function coveredByAny(free, busy) {
+    return free.some(function (f) { return f.start <= busy.start && busy.end <= f.end; });
+  }
+
+  /** 表示時間帯からはみ出した分を切り落とす。完全に外なら null */
+  function clipRange(range, dayStart, total) {
+    const dayEnd = dayStart + total;
+    const start = Math.max(range.start, dayStart);
+    const end = Math.min(range.end, dayEnd);
+    if (end <= start) return null;
+    return {
+      left: (start - dayStart) / total * 100,
+      width: (end - start) / total * 100
+    };
+  }
+
+  /**
+   * 重なり合う割り当てを段に振り分ける。
+   *
+   * **1つの場所の同じ時間に入るのは1人まで**なので、本来ここは重ならない。
+   * それでも段組みを残しているのは、シートを直接編集して重なりを作れてしまうため。
+   * **重なりを画面から隠さない。** 隠すと、なぜ登録できないのかが分からなくなる。
+   */
+  function assignLanes(rows) {
+    const sorted = rows.slice().sort(function (a, b) {
+      if (a.start_time !== b.start_time) return a.start_time < b.start_time ? -1 : 1;
+      return a.end_time < b.end_time ? -1 : 1;
+    });
+    const laneEnds = [];
+    const items = sorted.map(function (r) {
+      const start = toMin(r.start_time);
+      const end = toMin(r.end_time);
+      let lane = laneEnds.findIndex(function (e) { return e <= start; });
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(end);
+      } else {
+        laneEnds[lane] = end;
+      }
+      return { row: r, lane: lane };
+    });
+    return { items: items, count: laneEnds.length };
+  }
+
+  // ------------------------------------------------------------ 時間軸
+
+  /**
+   * 1時間ごとの目盛り。
+   *
+   * **印刷ビューはページごとにこれを繰り返す。** 2ページ目から先に目盛りが無いと、
+   * 帯がどの時間なのか紙の上では追えなくなるため。
+   */
+  function renderTicks(dayStart, dayEnd, total) {
+    let html = '';
+    for (let m = dayStart; m <= dayEnd; m += 60) {
+      const left = (m - dayStart) / total * 100;
+      // 両端はラベルが画面外へはみ出すため、寄せ方を変える
+      const edge = m === dayStart ? ' board__tick--first'
+        : (m + 60 > dayEnd ? ' board__tick--last' : '');
+      html += '<span class="board__tick' + edge +
+        '" style="left:' + left + '%">' + ml(m) + '</span>';
+    }
+    return html;
+  }
+
+  // ------------------------------------------------------- 人ごとの並べ替え
+
+  /**
+   * 人ごとに「入れる時間」と「割り当て済み」を集める。
+   *
+   * 出すのは**その日に関わりのある人だけ**（入れる時間帯がある人、または割り当てのある人）。
+   * 申告の無いボランティアは出さない。空行が並ぶと、空いている人を探すという
+   * 本来の目的が埋もれるため。
+   *
+   * **職員は毎日出る。** 申告が無くても、サーバーが既定の勤務時間帯を補って返すため
+   * （service_board.js `appendStaffDefaultAvailability_`）。
+   *
+   * @param {{availability: Array, assignments: Array}} data getDayBoard の戻り値
+   * @param {{personOf: function, placeNameOf: function}} helpers 人・場所の引き当て
+   */
+  function buildPeopleRows(data, helpers) {
+    const byPerson = {};
+    const ensure = function (personId) {
+      if (!byPerson[personId]) byPerson[personId] = { personId: personId, free: [], busy: [] };
+      return byPerson[personId];
+    };
+
+    data.availability.forEach(function (a) {
+      ensure(a.person_id).free.push({
+        start: toMin(a.start_time),
+        end: toMin(a.end_time)
+      });
+    });
+
+    data.assignments.forEach(function (a) {
+      ensure(a.person_id).busy.push({
+        assignmentId: a.id,
+        start: toMin(a.start_time),
+        end: toMin(a.end_time),
+        place: helpers.placeNameOf(a.place_id),
+        time: tl(a.start_time) + '–' + tl(a.end_time)
+      });
+    });
+
+    return Object.keys(byPerson).map(function (personId) {
+      const row = byPerson[personId];
+      row.person = helpers.personOf(personId) ||
+        { id: personId, name: '(不明な人)', type: 'volunteer', kana: '' };
+      // 並べ替え（割り当ての少ない人を上に）と「空き」の判定にだけ使う。画面には出さない
+      row.busyMin = totalMinutes(row.busy);
+      // 申告の外に割り当てられている人（design.md 6.5 no_availability の予告）
+      row.outside = row.busy.filter(function (b) { return !coveredByAny(row.free, b); }).length;
+      row.free.sort(byStart);
+      row.busy.sort(byStart);
+      return row;
+    }).sort(comparePeopleRows);
+  }
+
+  /**
+   * まだ余裕のある人を上に出す。
+   * 「あと誰に頼めるか」を探すための並びなので、割り当ての少ない人から見えた方が速い。
+   * 同数ならボランティアを先に（design.md 6.3 の並びに合わせる）。
+   */
+  function comparePeopleRows(a, b) {
+    if (a.busyMin !== b.busyMin) return a.busyMin - b.busyMin;
+    const at = a.person.type === 'staff' ? 1 : 0;
+    const bt = b.person.type === 'staff' ? 1 : 0;
+    if (at !== bt) return at - bt;
+    const ak = a.person.kana || a.person.name || '';
+    const bk = b.person.kana || b.person.name || '';
+    return String(ak).localeCompare(String(bk), 'ja');
+  }
+
+  // ------------------------------------------------------- 性別・年齢の表記
+
+  /*
+    サーバーは `admin` を付けた呼び出しにだけ gender / age を載せてくる
+    （api.js getDayBoard）。ここで呼び出し元を見る必要は無く、無ければ空文字になる。
+
+    **あるものだけを出す。** 列を追加する前に登録された人は未入力であり、
+    「その他」「回答しない」を選んだ人の性別は配置表に出さない（GENDER_OPTIONS の short）。
+    そのため「性別だけ」「年齢だけ」「どちらも無し」のすべてが起こりうる。
+  */
+
+  /** 一覧向け（例: 「女性 / 42歳」）。無ければ空文字 */
+  function personMeta(person) {
+    return personMetaParts(person, 'label', '歳').join(' / ');
+  }
+
+  /**
+   * 帯向けの短縮形（例: 「女42」）。無ければ空文字。
+   * 帯は1行で、はみ出すと `…` で切られるため、区切り文字も「歳」も入れずに詰める。
+   */
+  function personMetaShort(person) {
+    return personMetaParts(person, 'short', '').join('');
+  }
+
+  /**
+   * @param {string} genderKey GENDER_OPTIONS のどの表記を使うか（'label' / 'short'）
+   * @param {string} ageSuffix 年齢に添える文字（'歳' / ''）
+   */
+  function personMetaParts(person, genderKey, ageSuffix) {
+    if (!person) return [];
+    const parts = [];
+    // short が空の性別（その他・回答しない）は、どちらの表記でも出さない
+    const opt = App.genderOption(person.gender);
+    if (opt && opt.short) parts.push(opt[genderKey]);
+    if (person.age !== null && person.age !== undefined && person.age !== '') {
+      parts.push(person.age + ageSuffix);
+    }
+    return parts;
+  }
+
+  // ------------------------------------------------------------ 場所の絞り込み
+
+  /**
+   * その日に出す場所。廃止済みでも、その日の割り当てが残っていれば出す。
+   *
+   * places から行が消された場所を指す割り当ては、どのレーンにも入らず**画面から消える**。
+   * 見えないまま残ると気づけないため、専用の行（`missing`）に出す。
+   */
+  function visiblePlaces(places, assignments) {
+    const used = {};
+    assignments.forEach(function (a) { used[a.place_id] = true; });
+    const list = places.filter(function (p) { return p.active || used[p.id]; });
+
+    orphanPlaceIds(places, assignments).forEach(function (id) {
+      list.push({ id: id, name: '(不明な場所)', active: false, missing: true });
+    });
+    return list;
+  }
+
+  /** その日の割り当てが指しているのに、places に無い place_id */
+  function orphanPlaceIds(places, assignments) {
+    const known = {};
+    places.forEach(function (p) { known[p.id] = true; });
+    const seen = {};
+    const out = [];
+    assignments.forEach(function (a) {
+      if (known[a.place_id] || seen[a.place_id]) return;
+      seen[a.place_id] = true;
+      out.push(a.place_id);
+    });
+    return out;
+  }
+
+  return {
+    byStart: byStart,
+    totalMinutes: totalMinutes,
+    coveredByAny: coveredByAny,
+    clipRange: clipRange,
+    assignLanes: assignLanes,
+    renderTicks: renderTicks,
+    buildPeopleRows: buildPeopleRows,
+    comparePeopleRows: comparePeopleRows,
+    personMeta: personMeta,
+    personMetaShort: personMetaShort,
+    visiblePlaces: visiblePlaces,
+    orphanPlaceIds: orphanPlaceIds
+  };
+})();
+</script>

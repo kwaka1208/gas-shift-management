@@ -26,6 +26,8 @@
       </div>
       <div class="head__actions">
         <button type="button" class="btn btn--ghost" id="todayBtn">今日</button>
+        <!-- 印刷ビューを新しいタブで開く。紙が要るのは現場の全員なので閲覧URLでも出す -->
+        <button type="button" class="btn btn--ghost" id="pdfBtn">PDF出力</button>
       </div>
     </div>
 
@@ -87,6 +89,7 @@
     const BOOT = <?!= toJsonLiteral_(boot); ?>;
   </script>
   <?!= include('common_script'); ?>
+  <?!= include('board_core'); ?>
   <?!= include('script'); ?>
 </body>
 </html>

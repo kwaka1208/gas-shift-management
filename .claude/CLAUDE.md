@@ -61,9 +61,15 @@ menu.js          … スプレッドシートのメニュー（onOpen）。組�
 config.js        … シート定義・定数
 util.js          … 日付/時刻変換、区間の重なり判定など
 index.html       … 配置表（上=場所ごと／下=人ごと。style.html / script.html に分割）
+entry.html       … 応募フォーム（entry_script.html に分割）
+print.html       … 印刷ビュー（A3横。print_style.html / print_script.html に分割）
+common_script.html … 配置表・応募フォーム・印刷の共通処理（App）
+board_core.html  … 配置表と印刷ビューが共有する計算（Board）。段の振り分け・区間の判定など
 ```
 
 内部専用関数は末尾アンダースコア（`toMinutes_`）を付ける。
+
+**配置表と印刷ビューで同じ計算を2度書かないこと。** 段の振り分け・申告外の判定・人ごとの並べ替えは `board_core.html` に置く。片方だけ直すと、画面と紙が静かに食い違う。
 
 ## 開発ルール
 

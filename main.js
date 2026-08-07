@@ -5,7 +5,7 @@
  *   ?t=<token>&view=board&d=YYYY-MM-DD … 配置表（既定。閲覧のみ）
  *   ?t=<token>&view=admin&d=YYYY-MM-DD … 配置表（枠の作成・割り当てができる）
  *   ?t=<token>&view=entry              … 可用性登録フォーム
- *   ?t=<token>&view=print&d=YYYY-MM-DD … 印刷用配置表（Phase 5）
+ *   ?t=<token>&view=print&d=YYYY-MM-DD … 印刷用配置表（A3横。PDF保存もここから）
  *
  * board と admin は同じ画面（index.html）で、boot.admin の真偽だけが違う。
  * 配置表には「役割ごと」と「人ごと」の両方が縦に並ぶ（design.md 4.1）。
@@ -24,7 +24,8 @@ const KNOWN_VIEWS = ['board', 'admin', 'entry', 'print'];
 const VIEW_TEMPLATES = {
   board: 'index',
   admin: 'index',
-  entry: 'entry'
+  entry: 'entry',
+  print: 'print'
 };
 
 function doGet(e) {

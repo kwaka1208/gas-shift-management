@@ -1,0 +1,421 @@
+<script>
+/*
+  print_script.html … 印刷ビューのロジック
+
+  やることは3つだけ。
+    1. その日のデータを1回で取る（getBootstrap + getDayBoard）
+    2. A3横1枚ぶんの箱に行を積み、入らなくなったら次の紙へ送る
+    3. 印刷ダイアログを開く
+
+  【ページ分割を JS でやる理由】
+  CSS の break-inside / テーブルヘッダーの繰り返しには頼らない。行の高さが段数
+  （同じ場所に重なった割り当ての数）で変わるため、どこで切られるかを予測できず、
+  切れた紙の上に時間軸が出ない事故が起きる。**実際に置いて、はみ出したら戻す。**
+
+  【横は必ず1枚】
+  幅は用紙に固定してあり（print_style.html の --page-w）、帯の位置は % 指定なので
+  用紙幅に追従する。**ここで幅を計算しないこと。** 計算すると印刷倍率と二重にかかる。
+
+  【性別・年齢】
+  紙にも出す。そのためサーバーへは admin 相当で問い合わせる（下の boot 参照）。
+*/
+
+(function () {
+  'use strict';
+
+  const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+
+  const $ = function (id) { return document.getElementById(id); };
+
+  const call = App.call;
+  const esc = App.esc;
+  const toMin = App.toMin;
+  // 時刻を人に見せるときは必ずこちらを通す。24時以降が「翌01:00」になる
+  const tl = App.timeLabel;
+  const toast = App.toast;
+
+  const state = {
+    token: BOOT.token,
+    date: BOOT.date,
+    config: null,
+    places: [],
+    assignments: [],
+    availability: [],
+    peopleById: {}
+  };
+
+  // ------------------------------------------------------------ 起動
+
+  function boot() {
+    Promise.all([
+      call('getBootstrap', state.token),
+      /*
+        第3引数の true で性別・年齢が返る（api.js getDayBoard）。
+
+        **これは権限ではない。** 閲覧トークンを知っていれば誰でも渡せる値で、
+        管理URLに `&view=admin` を足すのと同じ水準のもの。
+        紙は配られて手を離れるので、ここに載る情報は「配布先の全員に見せてよいもの」
+        に限ること。連絡先はサーバーが誰にも返さない（service_board.js）。
+      */
+      call('getDayBoard', state.token, state.date, true)
+    ]).then(function (res) {
+      state.config = res[0].config;
+      state.places = res[0].places;
+      state.assignments = res[1].assignments;
+      state.availability = res[1].availability;
+      state.peopleById = {};
+      res[1].people.forEach(function (p) { state.peopleById[p.id] = p; });
+
+      $('loading').hidden = true;
+      $('toolbarTitle').textContent = dateLabel() + ' の配置表';
+      render();
+      autoPrint();
+    }).catch(function (e) {
+      $('loading').textContent = e.message;
+      toast(e.message, true);
+    });
+  }
+
+  // ------------------------------------------------------------ 紙面の組み立て
+
+  function render() {
+    const cfg = state.config;
+    const dayStart = toMin(cfg.day_start);
+    const dayEnd = toMin(cfg.day_end);
+    const total = dayEnd - dayStart;
+
+    if (total <= 0) {
+      $('loading').hidden = false;
+      $('loading').textContent =
+        '表示時間帯の設定が正しくありません（_config の day_start / day_end）。';
+      return;
+    }
+
+    const ctx = { dayStart: dayStart, dayEnd: dayEnd, total: total };
+
+    layoutSection(ctx, placesSection(ctx));
+    layoutSection(ctx, peopleSection(ctx));
+  }
+
+  /** 場所ごと（上のページ群）。1行＝1場所 */
+  function placesSection(ctx) {
+    const byPlace = {};
+    state.assignments.forEach(function (a) {
+      (byPlace[a.place_id] = byPlace[a.place_id] || []).push(a);
+    });
+
+    const places = Board.visiblePlaces(state.places, state.assignments);
+    const orphans = Board.orphanPlaceIds(state.places, state.assignments);
+
+    return {
+      cls: 'sheetPage--places',
+      title: '場所ごと',
+      // places シートから消された場所を指す割り当て。紙の上でも見落とさないようにする
+      warnHtml: orphans.length === 0 ? '' :
+        '<p class="sheetPage__warn">places シートに無い場所を指す割り当てがあります' +
+        '（place_id: ' + orphans.map(esc).join(' / ') + '）。' +
+        '「(不明な場所)」の行に出しています。</p>',
+      metaHtml: '<div class="sheetPage__meta">' +
+        '<span>表示時間帯 <b>' + esc(tl(state.config.day_start)) + '–' +
+          esc(tl(state.config.day_end)) + '</b></span>' +
+        '<span>場所 <b>' + places.length + '</b></span>' +
+        '<span>割り当て <b>' + state.assignments.length + '</b>件</span>' +
+        '<span>（ ）内は性別・年齢、「職」は職員</span>' +
+      '</div>',
+      emptyHtml: '<p class="empty">場所が登録されていません。</p>',
+      rows: places.map(function (p) {
+        return placeRowHtml(p, byPlace[p.id] || [], ctx);
+      })
+    };
+  }
+
+  /** 人ごと（下のページ群）。1行＝1人 */
+  function peopleSection(ctx) {
+    const rows = Board.buildPeopleRows(
+      { availability: state.availability, assignments: state.assignments },
+      { personOf: personOf, placeNameOf: placeNameOf });
+    const idle = rows.filter(function (r) { return r.busyMin === 0; }).length;
+
+    return {
+      cls: 'sheetPage--people',
+      title: '人ごと',
+      warnHtml: '',
+      metaHtml: '<div class="sheetPage__meta">' +
+        '<span><b>' + rows.length + '</b>人が登録</span>' +
+        '<span>まだ割り当て無し <b>' + idle + '</b>人</span>' +
+        '<span class="legend__item">' +
+          '<span class="legend__swatch legend__swatch--free"></span>入れる時間</span>' +
+        '<span class="legend__item">' +
+          '<span class="legend__swatch legend__swatch--busy"></span>割り当て済み</span>' +
+        // 白黒で刷ると色では区別が付かない。印の意味を必ず紙に書いておく
+        '<span class="legend__item">' +
+          '<span class="legend__swatch legend__swatch--warn"></span>' +
+          '⚠ 入れると申告された時間の外</span>' +
+      '</div>',
+      emptyHtml: '<p class="empty">この日に入れる人がまだ登録されていません。</p>',
+      rows: rows.map(function (r) { return personRowHtml(r, ctx); })
+    };
+  }
+
+  /**
+   * 1セクションぶんの行を紙へ積む。
+   *
+   * **入るかどうかは実測で決める。** 行を1つ置くたびに、その行の下端が
+   * 紙の内側に収まっているかを見る。はみ出したら取り除いて次の紙へ回す。
+   *
+   * 時間軸の目盛りは**紙ごとに必ず先頭へ置く**（2枚目から先が読めなくなるため）。
+   * 凡例と件数は1枚目にだけ置く（毎枚出すと紙面が減る）。
+   */
+  function layoutSection(ctx, section) {
+    const pages = [];
+    let page = null;
+    let inner = null;
+
+    const startPage = function () {
+      const first = pages.length === 0;
+      page = document.createElement('section');
+      page.className = 'sheetPage ' + section.cls;
+      page.innerHTML =
+        '<div class="sheetPage__head">' +
+          '<h2 class="sheetPage__title">' + esc(section.title) + '</h2>' +
+          '<span class="sheetPage__date">' + esc(dateLabel()) + '</span>' +
+          '<span class="sheetPage__no"></span>' +
+        '</div>' +
+        (first ? (section.warnHtml || '') + (section.metaHtml || '') : '') +
+        '<div class="board__inner" style="--hours:' + (ctx.total / 60) + '">' +
+          axisRowHtml(ctx) +
+        '</div>';
+      $('sheet').appendChild(page);
+      inner = page.querySelector('.board__inner');
+      pages.push(page);
+    };
+
+    startPage();
+
+    if (section.rows.length === 0) {
+      inner.insertAdjacentHTML('afterend', section.emptyHtml);
+    }
+
+    section.rows.forEach(function (html) {
+      inner.insertAdjacentHTML('beforeend', html);
+      const placed = inner.lastElementChild;
+      if (fitsInPage(page, placed)) return;
+
+      /*
+        1行目からはみ出す場合は諦めてそのまま置く。
+        取り除いて次の紙へ回しても、次の紙でも同じことが起きて紙が無限に増える。
+        （段数が極端に多い場所を作ったときにだけ起こりうる）
+      */
+      if (inner.children.length <= 2) return;
+
+      inner.removeChild(placed);
+      startPage();
+      inner.insertAdjacentHTML('beforeend', html);
+    });
+
+    numberPages(pages);
+  }
+
+  /**
+   * その要素が紙の内側（下端の余白より上）に収まっているか。
+   *
+   * **甘く見ないこと。** 1px でも越えたものは次の紙へ回す。
+   * 印刷時は紙の高さを上限（max-height）でしか縛れないので、ここで通した分は
+   * そのまま印刷結果のはみ出しになる。用紙の高さには既に 2mm の余裕を取ってある
+   * （print_style.html --page-h）ので、厳しく見ても1行余分に落ちることはない。
+   */
+  function fitsInPage(page, el) {
+    const box = page.getBoundingClientRect();
+    const pad = parseFloat(getComputedStyle(page).paddingBottom) || 0;
+    return el.getBoundingClientRect().bottom <= box.bottom - pad;
+  }
+
+  /** 「1 / 3」。セクションごとに数える（場所ごと・人ごとを別々に数えたいため） */
+  function numberPages(pages) {
+    pages.forEach(function (p, i) {
+      p.querySelector('.sheetPage__no').textContent = (i + 1) + ' / ' + pages.length;
+    });
+  }
+
+  function axisRowHtml(ctx) {
+    return '<div class="board__axisRow">' +
+      '<div class="board__corner"></div>' +
+      '<div class="board__axis">' +
+        Board.renderTicks(ctx.dayStart, ctx.dayEnd, ctx.total) +
+      '</div>' +
+    '</div>';
+  }
+
+  // ------------------------------------------------------------ 行の組み立て
+
+  /*
+    配置表（script.html）の描画と同じ形を作るが、**操作のためのものは一切付けない。**
+    紙にはボタンもホバーも無いので、title 属性に逃がしていた情報は帯の中に出すか、
+    出しきれないものは諦める（紙で足りなければ画面を見てもらう）。
+  */
+
+  /** 1場所ぶんの行 */
+  function placeRowHtml(place, rows, ctx) {
+    const inRange = [];
+    let outCount = 0;
+
+    rows.forEach(function (a) {
+      if (toMin(a.end_time) <= ctx.dayStart || toMin(a.start_time) >= ctx.dayEnd) outCount++;
+      else inRange.push(a);
+    });
+
+    const lanes = Board.assignLanes(inRange);
+    const laneCount = Math.max(1, lanes.count);
+    const minHeight = 'calc(.5rem + ' + laneCount + ' * var(--block-h) + ' +
+      (laneCount - 1) + ' * .25rem)';
+
+    const blocks = lanes.items.map(function (item) {
+      return slotHtml(item.row, item.lane, ctx);
+    }).join('');
+
+    return '<div class="board__row"' +
+        (place.color ? ' data-color="' + esc(place.color) + '"' : '') + '>' +
+      '<div class="board__place' + (place.active ? '' : ' board__place--off') + '">' +
+        esc(place.name) +
+        (place.missing ? '<small>（places にありません）</small>'
+          : (place.active ? '' : '<small>（廃止）</small>')) +
+        (outCount > 0 ? '<small>表示範囲外 ' + outCount + '件</small>' : '') +
+      '</div>' +
+      '<div class="board__lanes" style="min-height:' + minHeight + '">' + blocks + '</div>' +
+    '</div>';
+  }
+
+  /** 割り当て1件の帯。**枠は無い。この帯そのものが1件の割り当て** */
+  function slotHtml(row, lane, ctx) {
+    const start = Math.max(toMin(row.start_time), ctx.dayStart);
+    const end = Math.min(toMin(row.end_time), ctx.dayEnd);
+    const left = (start - ctx.dayStart) / ctx.total * 100;
+    const width = (end - start) / ctx.total * 100;
+    const top = 'calc(.25rem + ' + lane + ' * (var(--block-h) + .25rem))';
+
+    /*
+      名前に性別・年齢と職員の印を括弧で添える（例:「鈴木 花子（女42・職）」）。
+      帯は1行で `…` に切られるため、括弧の中身は短縮形にする（design.md 4.1.2）。
+    */
+    const tags = [Board.personMetaShort(personOf(row.person_id)),
+      isStaff(row.person_id) ? '職' : ''].filter(function (t) { return t; });
+    const who = personName(row.person_id) +
+      (tags.length > 0 ? '（' + tags.join('・') + '）' : '');
+
+    return '<div class="slot' + (row.carried_from ? ' slot--carried' : '') + '"' +
+      ' style="left:' + left + '%;width:' + width + '%;top:' + top + '">' +
+      '<span class="slot__time">' + (row.carried_from ? '前日から ' : '') +
+        esc(tl(row.start_time)) + '–' + esc(tl(row.end_time)) + '</span>' +
+      '<span class="slot__names">' + esc(who) + '</span>' +
+      (row.note ? '<span class="slot__note">' + esc(row.note) + '</span>' : '') +
+    '</div>';
+  }
+
+  /**
+   * 1人ぶんの行。
+   *
+   * **可用の帯の上に、割り当ての帯を重ねて描く。** 申告した時間のうち、
+   * どこが埋まってどこが空いているのかを、目で追わずに分かるようにするため。
+   */
+  function personRowHtml(row, ctx) {
+    const person = row.person;
+
+    const free = row.free.map(function (f) {
+      const box = Board.clipRange(f, ctx.dayStart, ctx.total);
+      if (!box) return '';
+      return '<span class="res__free"' +
+        ' style="left:' + box.left + '%;width:' + box.width + '%"></span>';
+    }).join('');
+
+    const busy = row.busy.map(function (b) {
+      const box = Board.clipRange(b, ctx.dayStart, ctx.total);
+      if (!box) return '';
+      // 申告の外に割り当てられている（design.md 6.5 no_availability）
+      const outside = !Board.coveredByAny(row.free, b);
+      /*
+        **色だけで示さない。** 画面では赤い帯で足りるが、白黒で刷ると
+        普通の帯と同じ濃さになる。先頭に印を置いて文字でも読めるようにする
+        （design.md 4.5「色に頼らず、状態は文字でも示す」）。
+      */
+      const label = (outside ? '⚠ ' : '') + b.place;
+      return '<span class="res__busy' + (outside ? ' res__busy--warn' : '') + '"' +
+        ' style="left:' + box.left + '%;width:' + box.width + '%">' +
+        '<span class="res__busyLabel">' + esc(label) + '</span></span>';
+    }).join('');
+
+    // まだ誰にも割り当てていない人だけ印を出す。**割当済みの人には何も足さない**
+    const note = row.busyMin === 0 ? '<small class="res__idle">空き</small>' : '';
+    const meta = Board.personMeta(person);
+
+    return '<div class="board__row">' +
+      '<div class="board__place">' +
+        esc(person.name) + (person.type === 'staff' ? '<small>職員</small>' : '') +
+        (meta ? '<small>' + esc(meta) + '</small>' : '') +
+        note +
+        (row.outside > 0 ? '<small class="res__warn">申告外 ' + row.outside + '件</small>' : '') +
+      '</div>' +
+      '<div class="board__lanes res__lanes">' + free + busy + '</div>' +
+    '</div>';
+  }
+
+  // ------------------------------------------------------------ 引き当て
+
+  function personOf(personId) { return state.peopleById[personId] || null; }
+
+  function personName(personId) {
+    const p = personOf(personId);
+    return p ? p.name : '(不明な人)';
+  }
+
+  function isStaff(personId) {
+    const p = personOf(personId);
+    return !!p && p.type === 'staff';
+  }
+
+  function placeNameOf(placeId) {
+    const p = state.places.filter(function (x) { return x.id === placeId; })[0];
+    return p ? p.name : '(不明な場所)';
+  }
+
+  function dateLabel() {
+    return state.date + '（' + DOW[App.dowOf(state.date)] + '）';
+  }
+
+  // ------------------------------------------------------------ 印刷
+
+  let printed = false;
+
+  /**
+   * 紙面ができたら印刷ダイアログを開く。
+   *
+   * **1回だけ。** 開き直したい人のためにボタンも置いてある（print.html）。
+   * ダイアログを閉じたあとに勝手に開き直すと、閉じられなくなる。
+   *
+   * 少し待ってから呼ぶのは、フォントの読み込みでレイアウトが動くことがあるため。
+   * 動いたあとに印刷すると、紙の切れ目が画面のプレビューとずれる。
+   */
+  function autoPrint() {
+    if (printed) return;
+    printed = true;
+    window.setTimeout(function () {
+      try {
+        window.print();
+      } catch (e) {
+        // 印刷を開けなくても紙面は出来ている。ボタンから開き直してもらう
+        console.error('print failed:', e);
+      }
+    }, 400);
+  }
+
+  // ------------------------------------------------------------ イベント
+
+  $('printBtn').addEventListener('click', function () { window.print(); });
+
+  // 白黒プレビュー。画面の見え方だけを変える（印刷結果は変わらない）
+  $('monoToggle').addEventListener('change', function (e) {
+    document.body.classList.toggle('mono', e.target.checked);
+  });
+
+  boot();
+})();
+</script>

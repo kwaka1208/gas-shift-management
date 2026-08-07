@@ -50,6 +50,16 @@
   const todayStr = App.todayStr;
   const toast = App.toast;
 
+  // 印刷ビューと共有する計算は board_core.html（Board）から借りる。
+  // **ここで再実装しないこと。** 画面と紙で結果が食い違う原因になる
+  const coveredByAny = Board.coveredByAny;
+  const clipRange = Board.clipRange;
+  const assignLanes = Board.assignLanes;
+  const renderTicks = Board.renderTicks;
+  // 性別・年齢の表記（「女性 / 42歳」「女42」）。印刷ビューと同じ表記にする
+  const personMeta = Board.personMeta;
+  const personMetaShort = Board.personMetaShort;
+
   // ------------------------------------------------------------ モーダル
 
   function openModal(title, bodyHtml) {
@@ -234,19 +244,7 @@
 
   /** 表示する場所。廃止済みでも、その日の割り当てが残っていれば表示する */
   function visiblePlaces() {
-    const used = {};
-    state.assignments.forEach(function (a) { used[a.place_id] = true; });
-    const list = state.places.filter(function (p) { return p.active || used[p.id]; });
-
-    /*
-      places から行が消された場所を指す割り当ては、どのレーンにも入らず**画面から消える**。
-      見えないまま残ると気づけず、その人を外すことも直すこともできない。
-      専用のレーンに出して、画面から直せるようにする。
-    */
-    orphanPlaceIds().forEach(function (id) {
-      list.push({ id: id, name: '(不明な場所)', active: false, missing: true });
-    });
-    return list;
+    return Board.visiblePlaces(state.places, state.assignments);
   }
 
   /**
@@ -265,29 +263,7 @@
 
   /** その日の割り当てが指しているのに、places に無い place_id */
   function orphanPlaceIds() {
-    const known = {};
-    state.places.forEach(function (p) { known[p.id] = true; });
-    const seen = {};
-    const out = [];
-    state.assignments.forEach(function (a) {
-      if (known[a.place_id] || seen[a.place_id]) return;
-      seen[a.place_id] = true;
-      out.push(a.place_id);
-    });
-    return out;
-  }
-
-  function renderTicks(dayStart, dayEnd, total) {
-    let html = '';
-    for (let m = dayStart; m <= dayEnd; m += 60) {
-      const left = (m - dayStart) / total * 100;
-      // 両端はラベルが画面外へはみ出すため、寄せ方を変える
-      const edge = m === dayStart ? ' board__tick--first'
-        : (m + 60 > dayEnd ? ' board__tick--last' : '');
-      html += '<span class="board__tick' + edge +
-        '" style="left:' + left + '%">' + ml(m) + '</span>';
-    }
-    return html;
+    return Board.orphanPlaceIds(state.places, state.assignments);
   }
 
   // ------------------------------------------------------- 人ごとの一覧
@@ -302,93 +278,13 @@
   /**
    * 人ごとに「入れる時間」と「割り当て済み」を集める。
    *
-   * 出すのは**その日に関わりのある人だけ**（入れる時間帯がある人、または割り当てのある人）。
-   * 申告の無いボランティアは出さない。空行が並ぶと、空いている人を探すという
-   * 本来の目的が埋もれるため。
-   *
-   * **職員は毎日出る。** 申告が無くても、サーバーが既定の勤務時間帯を補って返すため
-   * （service_board.js `appendStaffDefaultAvailability_`）。
+   * 集計そのものは board_core.html（Board）に置いてある。印刷ビューと同じ並び・
+   * 同じ判定にするため。**ここで作り直さないこと。**
    */
   function buildPeopleRows() {
-    const byPerson = {};
-    const ensure = function (personId) {
-      if (!byPerson[personId]) byPerson[personId] = { personId: personId, free: [], busy: [] };
-      return byPerson[personId];
-    };
-
-    state.availability.forEach(function (a) {
-      ensure(a.person_id).free.push({
-        start: toMin(a.start_time),
-        end: toMin(a.end_time)
-      });
-    });
-
-    state.assignments.forEach(function (a) {
-      ensure(a.person_id).busy.push({
-        assignmentId: a.id,
-        start: toMin(a.start_time),
-        end: toMin(a.end_time),
-        place: placeNameOf(a.place_id),
-        time: tl(a.start_time) + '–' + tl(a.end_time)
-      });
-    });
-
-    return Object.keys(byPerson).map(function (personId) {
-      const row = byPerson[personId];
-      row.person = personOf(personId) ||
-        { id: personId, name: '(不明な人)', type: 'volunteer', kana: '' };
-      // 並べ替え（割り当ての少ない人を上に）と「空き」の判定にだけ使う。画面には出さない
-      row.busyMin = totalMinutes(row.busy);
-      // 申告の外に割り当てられている人（design.md 6.5 no_availability の予告）
-      row.outside = row.busy.filter(function (b) { return !coveredByAny(row.free, b); }).length;
-      row.free.sort(byStart);
-      row.busy.sort(byStart);
-      return row;
-    }).sort(comparePeopleRows);
-  }
-
-  function byStart(a, b) { return a.start - b.start || a.end - b.end; }
-
-  /**
-   * 重なりを取り除いた合計分数。二重に数えないための畳み込み。
-   *
-   * **画面には出さない。** 並べ替え（割り当ての少ない人を上に）と
-   * 「空き」の判定にだけ使う。1人が同じ日に複数行を持てるため、
-   * 単純に足すと重なった分を二重に数えてしまう。
-   */
-  function totalMinutes(ranges) {
-    const sorted = ranges.slice().sort(byStart);
-    let total = 0;
-    let cur = null;
-    sorted.forEach(function (r) {
-      if (cur && r.start <= cur.end) {
-        if (r.end > cur.end) { total += r.end - cur.end; cur.end = r.end; }
-      } else {
-        total += r.end - r.start;
-        cur = { start: r.start, end: r.end };
-      }
-    });
-    return total;
-  }
-
-  /** その割り当てが、申告のどれかに収まっているか */
-  function coveredByAny(free, busy) {
-    return free.some(function (f) { return f.start <= busy.start && busy.end <= f.end; });
-  }
-
-  /**
-   * まだ余裕のある人を上に出す。
-   * 「あと誰に頼めるか」を探すための並びなので、割り当ての少ない人から見えた方が速い。
-   * 同数ならボランティアを先に（design.md 6.3 の並びに合わせる）。
-   */
-  function comparePeopleRows(a, b) {
-    if (a.busyMin !== b.busyMin) return a.busyMin - b.busyMin;
-    const at = a.person.type === 'staff' ? 1 : 0;
-    const bt = b.person.type === 'staff' ? 1 : 0;
-    if (at !== bt) return at - bt;
-    const ak = a.person.kana || a.person.name || '';
-    const bk = b.person.kana || b.person.name || '';
-    return String(ak).localeCompare(String(bk), 'ja');
+    return Board.buildPeopleRows(
+      { availability: state.availability, assignments: state.assignments },
+      { personOf: personOf, placeNameOf: placeNameOf });
   }
 
   function renderPeople() {
@@ -510,18 +406,6 @@
     '</div>';
   }
 
-  /** 表示時間帯からはみ出した分を切り落とす。完全に外なら null */
-  function clipRange(range, dayStart, total) {
-    const dayEnd = dayStart + total;
-    const start = Math.max(range.start, dayStart);
-    const end = Math.min(range.end, dayEnd);
-    if (end <= start) return null;
-    return {
-      left: (start - dayStart) / total * 100,
-      width: (end - start) / total * 100
-    };
-  }
-
   /**
    * 人ごとの一覧からの解除。
    *
@@ -579,34 +463,6 @@
         blocks +
       '</div>' +
     '</div>';
-  }
-
-  /**
-   * 重なり合う割り当てを段に振り分ける。
-   *
-   * **1つの場所の同じ時間に入るのは1人まで**なので、本来ここは重ならない。
-   * それでも段組みを残しているのは、シートを直接編集して重なりを作れてしまうため。
-   * **重なりを画面から隠さない。** 隠すと、なぜ登録できないのかが分からなくなる。
-   */
-  function assignLanes(rows) {
-    const sorted = rows.slice().sort(function (a, b) {
-      if (a.start_time !== b.start_time) return a.start_time < b.start_time ? -1 : 1;
-      return a.end_time < b.end_time ? -1 : 1;
-    });
-    const laneEnds = [];
-    const items = sorted.map(function (r) {
-      const start = toMin(r.start_time);
-      const end = toMin(r.end_time);
-      let lane = laneEnds.findIndex(function (e) { return e <= start; });
-      if (lane === -1) {
-        lane = laneEnds.length;
-        laneEnds.push(end);
-      } else {
-        laneEnds[lane] = end;
-      }
-      return { row: r, lane: lane };
-    });
-    return { items: items, count: laneEnds.length };
   }
 
   /**
@@ -851,46 +707,6 @@
   function personName(personId) {
     const p = personOf(personId);
     return p ? p.name : '(不明な人)';
-  }
-
-  /*
-    性別・年齢の表示。
-
-    サーバーは管理画面からの呼び出しにだけ gender / age を載せてくるので、
-    ここで adminMode を見る必要は無い。閲覧画面では単に空文字になる。
-
-    **あるものだけを出す。** 列を追加する前に登録された人は未入力であり、
-    「その他」「回答しない」を選んだ人の性別は配置表に出さない（GENDER_OPTIONS の short）。
-    そのため「性別だけ」「年齢だけ」「どちらも無し」のすべてが起こりうる。
-  */
-
-  /** 一覧向け（例: 「女性 / 42歳」）。無ければ空文字 */
-  function personMeta(person) {
-    return personMetaParts(person, 'label', '歳').join(' / ');
-  }
-
-  /**
-   * 帯向けの短縮形（例: 「女42」）。無ければ空文字。
-   * 帯は1行で、はみ出すと `…` で切られるため、区切り文字も「歳」も入れずに詰める。
-   */
-  function personMetaShort(person) {
-    return personMetaParts(person, 'short', '').join('');
-  }
-
-  /**
-   * @param {string} genderKey GENDER_OPTIONS のどの表記を使うか（'label' / 'short'）
-   * @param {string} ageSuffix 年齢に添える文字（'歳' / ''）
-   */
-  function personMetaParts(person, genderKey, ageSuffix) {
-    if (!person) return [];
-    const parts = [];
-    // short が空の性別（その他・回答しない）は、どちらの表記でも出さない
-    const opt = App.genderOption(person.gender);
-    if (opt && opt.short) parts.push(opt[genderKey]);
-    if (person.age !== null && person.age !== undefined && person.age !== '') {
-      parts.push(person.age + ageSuffix);
-    }
-    return parts;
   }
 
   function isStaff(personId) {
@@ -1419,6 +1235,22 @@
   $('datePicker').addEventListener('change', function (e) {
     if (e.target.value) loadDay(e.target.value);
     else e.target.value = state.date;
+  });
+
+  /*
+    印刷ビューを別のタブで開く（?view=print）。**この画面では印刷しない。**
+    管理操作のためのDOMを @media print で打ち消し続けるのは無理があり、
+    画面を直すたびに紙が静かに崩れるため、紙は専用の画面で組み立てる。
+
+    **別のタブで開くこと。** この画面をそのまま残せるので、印刷ビューに
+    「配置表へ戻る」を持たせる必要が無くなる（タブを閉じれば元の作業に戻れる）。
+  */
+  $('pdfBtn').addEventListener('click', function () {
+    window.open(App.appUrl({
+      t: state.token,
+      view: 'print',
+      d: state.date
+    }), '_blank');
   });
 
   /*

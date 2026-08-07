@@ -1,0 +1,326 @@
+<style>
+/*
+  print_style.html … 印刷ビュー専用のスタイル
+
+  style.html を読み込んだ上に重ねる。**帯やタイムラインの見た目は style.html のまま**にして、
+  ここでは「画面用の作り」を紙用に外すことに徹する。色や形を別に定義し直すと、
+  画面と紙で見え方が食い違い、紙を持って現場に立つ人が迷う。
+
+  外すのは主に次の3つ。
+    1. 横スクロール前提の最小幅（--hour-w）。紙は横に流せないので必ず用紙幅へ収める
+    2. 場所名の列の position: sticky（貼り付く相手が無い）
+    3. 画面用の操作系（ツールバー・トースト）
+
+  【用紙】A3横・余白8mm。中身が入る領域は 404mm × 281mm。
+  ページの高さを 279mm と 2mm 小さく取っているのは、丸め誤差で1行分だけ次の紙へ
+  こぼれて空白ページが出るのを防ぐため。**ここを 281mm に戻さないこと。**
+
+  【ページ分割】縦方向だけ。横は必ず1枚に収まる（要件）。
+  どこで切るかは print_script.html が実測して決める（行の高さが段数で変わるため、
+  CSS の break-inside では読める位置に切れない）。
+
+  【モノクロ前提】design.md 4.5「色に頼らず、状態は文字でも示す」。
+  会場のプリンタは白黒であることが多い。**色は補助にとどめ、色が消えても
+  同じことが読み取れる状態を保つ。** 具体的には次の3つを守る。
+
+    - 場所ごとの色分け（--tint-*）は白黒でほぼ同じ濃さに潰れる。行の区別は
+      罫線と場所名で付ける（だから罫線を画面より濃くしてある）
+    - 割り当ての帯は**白地＋濃い枠線**にする。淡い色の上に淡い帯が乗ると、
+      白黒にした瞬間に帯の輪郭が消える
+    - 申告外（--danger の赤）は白黒だと普通の帯と同じ濃さになる。
+      枠と「⚠」の文字で示す（print_script.html が文字を足す）
+
+  画面のプレビューには「白黒で確認」を用意した（body.mono）。**色を消したときに
+  読めなくなる変更を入れていないか、ここで確かめること。**
+*/
+
+@page {
+  size: A3 landscape;
+  margin: 8mm;
+}
+
+:root {
+  /* 用紙の中身が入る領域。print_script.html はこの箱に収まるまで行を積む */
+  --page-w: 404mm;   /* 420mm − 余白8mm × 2 */
+  --page-h: 279mm;   /* 297mm − 余白8mm × 2 − 2mm（上記の理由） */
+
+  --place-w: 34mm;   /* 場所名の列。紙では折り返せる幅を確保する */
+  --people-w: 44mm;  /* 人ごとは氏名＋性別年齢＋注記が入るので広く取る */
+
+  /*
+    **0 にする意味がある。** style.html の .board__lanes は
+    `min-width: calc(var(--hours) * var(--hour-w))` で1時間あたりの最小幅を確保し、
+    狭い画面では横スクロールさせている。紙にはスクロールが無いので、この最小幅を
+    殺して用紙幅いっぱいに詰める。帯の位置は元から % 指定なので自動で追従する。
+    単位付きの 0px であること（calc の結果が単位無しになると min-width が無効になる）。
+  */
+  --hour-w: 0px;
+
+  /*
+    帯の高さ。画面（3.25rem）より詰めて1ページに入る行数を稼ぐが、
+    **時刻・氏名・備考の3行が入る高さは残すこと。** 削りすぎると備考が切れる。
+  */
+  --block-h: 2.75rem;
+  --gutter: 0;
+}
+
+/* 背景色（場所ごとの色分け・割り当ての帯）は既定で印刷されない。必ず出す */
+body {
+  background: #8b8f94;   /* 画面では紙の外を暗くして、用紙の縁が分かるようにする */
+  font-size: 13px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ------------------------------------------------------------ ツールバー */
+
+/*
+  画面にだけ出す操作列。**紙には出さない。**
+  印刷ダイアログを閉じたあとに押し直せるよう、ボタンは常に見える位置に置く。
+*/
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  flex-wrap: wrap;
+  padding: .625rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar__title { margin: 0; font-size: 1rem; }
+.toolbar__actions { margin-left: auto; display: flex; align-items: center; gap: .75rem; }
+
+.toolbar__mono {
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+  font-size: .8125rem;
+  color: var(--fg-weak);
+  white-space: nowrap;
+}
+
+.toolbar__hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: .75rem;
+  color: var(--fg-weak);
+}
+
+.toolbar__hint b { color: var(--danger); }
+
+/* ---------------------------------------------------------------- 用紙 */
+
+.sheetWrap { overflow-x: auto; padding: 8mm 0; }
+
+.sheetPage {
+  width: var(--page-w);
+  height: var(--page-h);
+  /*
+    はみ出しは隠す。**この指定に印刷結果を守らせない。**
+    行を1つ置くたびに下端を測って折り返している（print_script.html fitsInPage）ので、
+    ここが効く状態のまま印刷されることは無い。画面で崩れに気づくための保険。
+  */
+  overflow: hidden;
+  margin: 0 auto 8mm;
+  padding: 6mm 8mm;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .35);
+  /* 1ページ＝1枚。最後の1枚だけ改ページしない（末尾に白紙が出る） */
+  break-after: page;
+  page-break-after: always;
+}
+
+.sheetPage:last-child { break-after: auto; page-break-after: auto; }
+
+/* -------------------------------------------------------- ページの見出し */
+
+.sheetPage__head {
+  display: flex;
+  align-items: baseline;
+  gap: .75rem;
+  padding-bottom: 2mm;
+  margin-bottom: 2mm;
+  border-bottom: 2px solid var(--fg);
+}
+
+.sheetPage__title { margin: 0; font-size: 1.125rem; font-weight: 700; }
+.sheetPage__date { font-size: 1rem; font-weight: 600; }
+.sheetPage__no { margin-left: auto; font-size: .8125rem; color: var(--fg-weak); }
+
+/* 凡例・件数・注意書き。**そのセクションの1枚目にだけ出す** */
+.sheetPage__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem 1.25rem;
+  margin-bottom: 1.5mm;
+  font-size: .75rem;
+  color: var(--fg-weak);
+}
+
+.sheetPage__meta b { color: var(--fg); }
+
+.sheetPage__warn {
+  margin: 0 0 1.5mm;
+  font-size: .75rem;
+  color: var(--danger);
+}
+
+/* ------------------------------------------- タイムラインを紙用に組み直す */
+
+/*
+  style.html の .board__inner は `min-width: max-content` で内容の幅まで伸びる。
+  横スクロールの中では正しいが、紙では用紙からはみ出す。用紙幅に固定する。
+*/
+.sheetPage .board__inner {
+  width: 100%;
+  min-width: 0;
+}
+
+/* 貼り付く相手（横スクロールの器）が無い。static に戻す */
+.sheetPage .board__place,
+.sheetPage .board__corner {
+  position: static;
+  background: transparent;
+  padding: .25rem .375rem;
+  font-size: .75rem;
+}
+
+.sheetPage .board__place small { font-size: .625rem; }
+
+/* 場所名の列と時間軸の間に区切りを残す（紙は色が薄く出るため線で補う） */
+.sheetPage .board__place { border-right: 1px solid var(--fg-weak); }
+
+.sheetPage .board__axis { height: 1.25rem; border-bottom: 1px solid var(--fg-weak); }
+.sheetPage .board__tick { font-size: .6875rem; color: var(--fg); }
+
+/*
+  行の区切りは画面より濃くする。**白黒印刷では場所ごとの色分けが潰れるため、
+  ここが行を見分ける唯一の手がかりになる。** 薄い --line に戻さないこと。
+*/
+.sheetPage .board__row + .board__row { border-top: 1px solid var(--fg-weak); }
+
+/* 人ごとのページは氏名の列を広げる（#people ではなくなるため、ここで指定し直す） */
+.sheetPage--people .board__place,
+.sheetPage--people .board__corner {
+  flex-basis: var(--people-w);
+  width: var(--people-w);
+}
+
+/* --------------------------------------------------------- 割り当ての帯 */
+
+/*
+  **背景を白にする。** 画面では淡い青灰（--slot-bg）だが、紙では場所ごとの
+  色分けの上に重なるため、白黒にすると帯と下地が同じ濃さになって輪郭が消える。
+  白地＋濃い枠線なら、色があってもなくても帯の範囲が読み取れる。
+*/
+.sheetPage .slot {
+  background: #fff;
+  border-color: var(--fg);
+  border-left-color: var(--fg);
+  font-size: .6875rem;
+  padding: .0625rem .25rem;
+}
+
+.sheetPage .slot__time { font-size: .625rem; }
+.sheetPage .slot__note { font-size: .625rem; }
+
+/*
+  前日から続いている帯。**破線であることが唯一の手がかり**になるので、
+  白黒でも分かるよう枠線を濃いまま残す（色を薄くして示さない）。
+  文字にも「前日から」と出している（print_script.html）。
+*/
+.sheetPage .slot--carried {
+  background: transparent;
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
+/* 人ごとの帯。塗りつぶしの上に白字が乗るので、色を必ず印刷させる */
+.sheetPage .res__free,
+.sheetPage .res__busy {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* 「入れる時間」は白黒でも下地と分かれるよう、枠線を濃くする */
+.sheetPage .res__free { border-color: var(--fg-weak); }
+
+.sheetPage .res__busy { font-size: .625rem; }
+
+/*
+  申告された時間の外に置かれた割り当て。
+
+  画面では赤で示しているが、**赤（#b3261e）と青（#1a6fd4）は白黒にすると
+  ほとんど同じ濃さになる。** 色を濃くしても薄くしても見分けは付かない。
+
+  そこで**明暗を逆にする。** ほかの帯は「濃い地＋白文字」、これだけ「白地＋太枠＋濃い文字」。
+  白黒でも一目で違うと分かり、しかも文字がいちばん読みやすい形になる。
+
+  斜線などの模様も試したが、模様の上に乗った白文字が白黒で読めなくなる。
+  **読めることを、目立つことより優先する。**
+
+  下に敷かれた「入れる時間」（薄い灰色・細い枠）と紛れないよう、枠は 2px にする。
+*/
+.sheetPage .res__busy--warn {
+  background: #fff;
+  border: 2px solid var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+  /* 枠の 2px×2 を引いた高さに合わせる（1.75rem の行のままだと文字が切れる） */
+  line-height: calc(1.75rem - 4px);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.sheetPage .res__lanes { min-height: 2.25rem; }
+
+/* 凡例の見本。帯と同じ見た目にする（別物に見えると凡例の意味が無い） */
+.sheetPage__meta .legend__swatch--warn {
+  background: #fff;
+  border: 2px solid var(--danger);
+}
+
+/* ------------------------------------------------------ 白黒プレビュー */
+
+/*
+  画面で色を落として見るためだけのもの。**印刷そのものには関与しない**
+  （白黒印刷はプリンタ側で色を落とす）。刷る前に読めるかどうかを確かめる手段。
+
+  filter は印刷にも効いてしまうため、@media screen の中だけに置くこと。
+*/
+@media screen {
+  body.mono .sheetPage { filter: grayscale(1); }
+}
+
+/* ---------------------------------------------------------------- 印刷時 */
+
+@media print {
+  /*
+    画面のための飾りをすべて外す。**ここで用紙の外側の余白をゼロにすること。**
+    残っていると、用紙1枚に収めた中身がその分だけ押し出されて2枚目にこぼれる。
+  */
+  body { background: #fff; }
+
+  .toolbar, .loading, .toast, .sheetWrap { display: block; }
+  .toolbar, .loading, .toast { display: none !important; }
+
+  .sheetWrap { overflow: visible; padding: 0; }
+
+  .sheetPage {
+    margin: 0;
+    box-shadow: none;
+    /*
+      用紙の高さぴったりに固定しない。ブラウザが印刷可能領域を 279mm より
+      わずかに狭く見積もると、最後の1行が押し出されて空白ページになる。
+      積む段階で 279mm に収めてあるので、ここは上限だけを決めれば足りる。
+    */
+    height: auto;
+    max-height: var(--page-h);
+    overflow: visible;
+  }
+}
+</style>

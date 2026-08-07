@@ -1,0 +1,56 @@
+<!--
+  print.html … 印刷ビュー（?view=print）の骨組み
+
+  A3横1枚に1日分を収め、続きは縦にページを分ける（横は必ず1枚）。
+  紙面の中身は print_script.html が組み立て、用紙の形は print_style.html が決める。
+
+  **配置表（index.html）とは別の画面にしてある。** 同じ画面に @media print を足す形にすると、
+  管理操作のためのDOM（モーダル・ツールバー・sticky ヘッダー）を印刷のたびに打ち消すことになり、
+  画面を直すたびに紙が静かに崩れる。
+-->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('style'); ?>
+  <?!= include('print_style'); ?>
+</head>
+<body>
+  <!-- 画面にだけ出る操作列。紙には出ない（print_style.html の @media print） -->
+  <div class="toolbar" id="toolbar">
+    <h1 class="toolbar__title" id="toolbarTitle">印刷プレビュー</h1>
+    <div class="toolbar__actions">
+      <!--
+        白黒プレビュー。**画面の見え方を変えるだけで、印刷結果には影響しない。**
+        会場のプリンタは白黒であることが多いため、刷る前に読めるか確かめられるようにする。
+      -->
+      <label class="toolbar__mono">
+        <input type="checkbox" id="monoToggle"> 白黒で確認
+      </label>
+      <button type="button" class="btn btn--primary" id="printBtn">印刷 / PDFに保存</button>
+    </div>
+    <p class="toolbar__hint">
+      印刷ダイアログで送信先を「PDFに保存」にすると、1つのPDFとして保存できます。
+      用紙は<b>A3・横</b>、倍率は<b>100%（既定）</b>のままにしてください。
+      倍率を変えると横幅が1枚に収まりません。
+      白黒で刷る場合は、場所ごとの色分けは出ません（行の区切り線と場所名で見分けてください）。
+    </p>
+  </div>
+
+  <div class="loading" id="loading">読み込んでいます…</div>
+
+  <!-- 用紙はここに積む。1つの .page が紙1枚 -->
+  <div class="sheetWrap"><div id="sheet"></div></div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script>
+    // doGet が埋め込む初期値。業務データは含まない（描画は getDayBoard の結果で行う）
+    const BOOT = <?!= toJsonLiteral_(boot); ?>;
+  </script>
+  <?!= include('common_script'); ?>
+  <?!= include('board_core'); ?>
+  <?!= include('print_script'); ?>
+</body>
+</html>
