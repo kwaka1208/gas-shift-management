@@ -8,10 +8,10 @@
  * **1つの枠に入るのは1人まで**という方針にした結果、枠と割り当ては常に1対1になり、
  * 分けて持つ意味が無くなったため統合した（design.md 3 / 6.6）。
  *
- * 経路も1つになった。**場所・日付・時間帯・人を決めると、割り当てが1行できる。**
+ * 経路も1つになった。**役割・日付・時間帯・人を決めると、割り当てが1行できる。**
  *
  * 代わりに失ったものがある。**「必要だがまだ誰もいない」を表せない。**
- * 不足の可視化が要るなら、場所ごとの必要時間帯を別テーブルで持つところから設計し直すこと。
+ * 不足の可視化が要るなら、役割ごとの必要時間帯を別テーブルで持つところから設計し直すこと。
  *
  * 【このファイルの3つの約束】
  *
@@ -21,8 +21,8 @@
  *    再検証しない限り、二重割り当てを防げない（design.md 7 排他制御）。
  *
  * 2. **弾くのは「事実として成立しない割り当て」だけにする。**
- *    - **同じ場所・同じ時間に2人目 … 弾く**（design.md 6.6）。同じ時間に複数人を
- *      置きたい場合は、場所を複数作って運用する
+ *    - **同じ役割・同じ時間に2人目 … 弾く**（design.md 6.6）。同じ時間に複数人を
+ *      置きたい場合は、役割を複数作って運用する
  *    - 同じ人が同日の重なる時間に二重 … 弾く（体はひとつしかない）
  *    - 可用性が時間帯を覆っていない … **弾かない。** design.md 6.5 の考え方
  *      （警告は表示のみ、自動削除はしない）に合わせる
@@ -65,7 +65,7 @@ function assignData_(input, operator) {
 }
 
 /**
- * 既にある割り当ての場所・時間帯・メモを直す（design.md 7 `saveAssignment`）。
+ * 既にある割り当ての役割・時間帯・メモを直す（design.md 7 `saveAssignment`）。
  *
  * **人は変えない。** 人を替えるのは「解除してから入れ直す」操作であり、
  * ここで一緒にできるようにすると、`_log` 上で誰がいつ外れたのかが追えなくなる。
@@ -158,9 +158,9 @@ function validateAssignmentInput_(input) {
 
   const placeId = trimStr_(payload.place_id);
   if (!placeId) {
-    errors.push('場所を選んでください。');
+    errors.push('役割を選んでください。');
   } else if (!indexById_(readTable_(SHEET_DEFS.PLACES)).has(placeId)) {
-    errors.push('この場所は places シートにありません（place_id: ' + placeId + '）。');
+    errors.push('この役割は places シートにありません（place_id: ' + placeId + '）。');
   }
 
   const unit = Number(getConfigValue_(CONFIG_KEY.SLOT_UNIT_MINUTES, 10)) || 10;
@@ -214,7 +214,7 @@ function resolvePerson_(personId, peopleById) {
  * **前後の日も見る。** 時刻は24時間制の延長で持つため（design.md 5.1）、
  * 日をまたぐ割り当ては前日の行として存在する。日付の完全一致だけで探すと、
  *   - 8/10 の `22:00–26:00` と 8/11 の `00:00–02:00`
- * が「別の日だから重ならない」と判定され、**同じ場所に2人立つ**。
+ * が「別の日だから重ならない」と判定され、**同じ役割に2人立つ**。
  *
  * 前日の行は24時間ぶん戻し、翌日の行は24時間ぶん進めて、この日の物差しに揃える。
  *
@@ -264,8 +264,8 @@ function checkConflicts_(cleaned, personId, selfId, peopleById) {
   const placeById = indexById_(readTable_(SHEET_DEFS.PLACES));
 
   /*
-    **同じ場所・重なる時間には1人まで**（design.md 6.6）。
-    複数人を置きたい場所は、場所そのものを複数作って運用する。
+    **同じ役割・重なる時間には1人まで**（design.md 6.6）。
+    複数人を置きたい役割は、役割そのものを複数作って運用する。
   */
   const placeTaken = overlapping.filter(function (a) {
     return trimStr_(a.place_id) === cleaned.place_id;
@@ -274,17 +274,17 @@ function checkConflicts_(cleaned, personId, selfId, peopleById) {
   if (placeTaken) {
     const who = peopleById.get(resolvePersonId_(placeTaken.person_id, peopleById));
     if (who && who.id === personId) {
-      throw new Error(who.name + 'さんは、この時間に同じ場所へ既に入っています。');
+      throw new Error(who.name + 'さんは、この時間に同じ役割へ既に入っています。');
     }
     throw new Error(
       placeName_(placeById, cleaned.place_id) + ' の ' +
       toDisplayTime_(placeTaken.start_time) + '–' + toDisplayTime_(placeTaken.end_time) +
       ' には既に' + (who ? who.name + 'さん' : '別の人') + 'が入っています。\n' +
-      '1つの場所の同じ時間に入れるのは1人までです。' +
-      'その人を解除するか、場所を分けて登録してください。');
+      '1つの役割の同じ時間に入れるのは1人までです。' +
+      'その人を解除するか、役割を分けて登録してください。');
   }
 
-  // 同じ人が同時刻に別の場所へ入っていないか（体はひとつしかない）
+  // 同じ人が同時刻に別の役割へ入っていないか（体はひとつしかない）
   const personTaken = overlapping.filter(function (a) {
     return resolvePersonId_(a.person_id, peopleById) === personId;
   })[0];
@@ -321,7 +321,7 @@ function publicAssignment_(row) {
  * `_log` に残す内容。
  *
  * 行を消してしまうと後から誰を外したのか分からなくなるため、
- * 名前と場所をこの時点で文字列に焼き付けておく。運用者がシートで追える形にすることが目的。
+ * 名前と役割をこの時点で文字列に焼き付けておく。運用者がシートで追える形にすることが目的。
  * **時刻は保存値のまま**（`25:00`）にする。シートの値と突き合わせられる方が優先。
  */
 function describeAssignment_(row, personName) {

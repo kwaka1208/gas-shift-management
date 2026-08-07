@@ -68,7 +68,7 @@ const Board = (function () {
   /**
    * 重なり合う割り当てを段に振り分ける。
    *
-   * **1つの場所の同じ時間に入るのは1人まで**なので、本来ここは重ならない。
+   * **1つの役割の同じ時間に入るのは1人まで**なので、本来ここは重ならない。
    * それでも段組みを残しているのは、シートを直接編集して重なりを作れてしまうため。
    * **重なりを画面から隠さない。** 隠すと、なぜ登録できないのかが分からなくなる。
    */
@@ -127,7 +127,7 @@ const Board = (function () {
    * （service_board.js `appendStaffDefaultAvailability_`）。
    *
    * @param {{availability: Array, assignments: Array}} data getDayBoard の戻り値
-   * @param {{personOf: function, placeNameOf: function}} helpers 人・場所の引き当て
+   * @param {{personOf: function, placeNameOf: function}} helpers 人・役割の引き当て
    */
   function buildPeopleRows(data, helpers) {
     const byPerson = {};
@@ -222,12 +222,12 @@ const Board = (function () {
     return parts;
   }
 
-  // ------------------------------------------------------------ 場所の絞り込み
+  // ------------------------------------------------------------ 役割の絞り込み
 
   /**
-   * その日に出す場所。廃止済みでも、その日の割り当てが残っていれば出す。
+   * その日に出す役割。廃止済みでも、その日の割り当てが残っていれば出す。
    *
-   * places から行が消された場所を指す割り当ては、どのレーンにも入らず**画面から消える**。
+   * places から行が消された役割を指す割り当ては、どのレーンにも入らず**画面から消える**。
    * 見えないまま残ると気づけないため、専用の行（`missing`）に出す。
    */
   function visiblePlaces(places, assignments) {
@@ -236,7 +236,7 @@ const Board = (function () {
     const list = places.filter(function (p) { return p.active || used[p.id]; });
 
     orphanPlaceIds(places, assignments).forEach(function (id) {
-      list.push({ id: id, name: '(不明な場所)', active: false, missing: true });
+      list.push({ id: id, name: '(不明な役割)', active: false, missing: true });
     });
     return list;
   }

@@ -188,8 +188,8 @@
 
     const places = visiblePlaces();
     if (places.length === 0) {
-      $('board').innerHTML = '<p class="empty">場所が登録されていません。' +
-        (state.adminMode ? '「場所」から登録してください。' : '') + '</p>';
+      $('board').innerHTML = '<p class="empty">役割が登録されていません。' +
+        (state.adminMode ? '「役割」から登録してください。' : '') + '</p>';
       return;
     }
 
@@ -222,7 +222,7 @@
       タップしたときに人を入れる画面が開いてしまう。
     */
     if (state.adminMode) {
-      // --assignable が付いたレーンだけ。places に無い場所には入れさせない
+      // --assignable が付いたレーンだけ。places に無い役割には入れさせない
       $('board').querySelectorAll('.board__lanes--assignable').forEach(function (el) {
         el.addEventListener('click', onLanesClickAssign);
       });
@@ -242,13 +242,13 @@
     }
   }
 
-  /** 表示する場所。廃止済みでも、その日の割り当てが残っていれば表示する */
+  /** 表示する役割。廃止済みでも、その日の割り当てが残っていれば表示する */
   function visiblePlaces() {
     return Board.visiblePlaces(state.places, state.assignments);
   }
 
   /**
-   * places に無い場所を指す割り当てがある、という注意書き。
+   * places に無い役割を指す割り当てがある、という注意書き。
    *
    * 管理モードのときだけ出す。閲覧者に見せても直しようがなく、不安にさせるだけ。
    */
@@ -256,9 +256,9 @@
     if (!state.adminMode) return '';
     const ids = orphanPlaceIds();
     if (ids.length === 0) return '';
-    return '<p class="warnLine">places シートに無い場所を指す割り当てがあります' +
+    return '<p class="warnLine">places シートに無い役割を指す割り当てがあります' +
       '（place_id: ' + ids.map(esc).join(' / ') + '）。' +
-      '「(不明な場所)」の行に出しています。タップして場所を選び直すか、解除してください。</p>';
+      '「(不明な役割)」の行に出しています。タップして役割を選び直すか、解除してください。</p>';
   }
 
   /** その日の割り当てが指しているのに、places に無い place_id */
@@ -270,7 +270,7 @@
 
   /*
     配置表と同じデータを「人ごと」に並べ替えて見せる。
-    上の表で場所の埋まり具合を見て、下の表で誰がまだ空いているかを探す、という使い方。
+    上の表で役割の埋まり具合を見て、下の表で誰がまだ空いているかを探す、という使い方。
 
     **サーバーへは問い合わせない。** getDayBoard が返した同じ state から組み立てる。
   */
@@ -365,7 +365,7 @@
       if (!box) return '';
       const outside = !coveredByAny(row.free, b);
       const label = b.place + ' ' + b.time;
-      // 場所ごとの帯と同じ詳細を出す（元の割り当てを引ければ）
+      // 役割ごとの帯と同じ詳細を出す（元の割り当てを引ければ）
       const src = assignmentOf(b.assignmentId);
       const carried = !!(src && src.carried_from);
       const tip = src
@@ -381,7 +381,7 @@
           ? ' data-unassign="' + esc(b.assignmentId) + '"' +
             ' data-who="' + esc(person.name) + '" data-what="' + esc(label) + '"'
           : '') +
-        // 前日から続く帯は解除させず、元の日へ誘導する（場所ごとの帯と同じ扱い）
+        // 前日から続く帯は解除させず、元の日へ誘導する（役割ごとの帯と同じ扱い）
         (state.adminMode && carried
           ? ' data-carried-id="' + esc(b.assignmentId) + '"' +
             ' data-carried="' + esc(src.carried_from) + '"'
@@ -410,7 +410,7 @@
    * 人ごとの一覧からの解除。
    *
    * **先に確認を挟む。** 帯は小さく、指が触れただけで人が消えると気付けないため。
-   * （場所ごとの帯をタップしたときは編集パネルが開くので、誤操作にならない）
+   * （役割ごとの帯をタップしたときは編集パネルが開くので、誤操作にならない）
    */
   function openUnassignModal(assignmentId, who, what) {
     openModal('割り当てを解除',
@@ -445,10 +445,10 @@
     }).join('');
 
     // 空いているところをタップすると人を入れられる。
-    // ただし places に無い場所には入れさせない（行き場の無い割り当てが増えるだけ）
+    // ただし places に無い役割には入れさせない（行き場の無い割り当てが増えるだけ）
     const assignable = state.adminMode && !place.missing;
 
-    // 背景色は行そのものに付ける。場所名の欄とタイムラインの両方が同じ色になり、
+    // 背景色は行そのものに付ける。役割名の欄とタイムラインの両方が同じ色になり、
     // 横スクロールしてもどの役割の行かを見失わない
     return '<div class="board__row"' +
         (place.color ? ' data-color="' + esc(place.color) + '"' : '') + '>' +
@@ -551,7 +551,7 @@
     if (preset) openNewAssignPanel(preset.place_id, preset);
   }
 
-  /** タップ位置から、場所と仮の時間帯を割り出す */
+  /** タップ位置から、役割と仮の時間帯を割り出す */
   function presetFromClick(e) {
     if (e.target.closest('.slot')) return null;
     const el = e.currentTarget;
@@ -581,13 +581,13 @@
 
   function placeOptions(selected) {
     /*
-      places に無い場所の割り当てを開いたとき、選択肢が無いと**先頭の場所が選ばれた状態**に
-      なり、保存すると黙って場所が変わってしまう。今の値をそのまま選択肢に出して、
+      places に無い役割の割り当てを開いたとき、選択肢が無いと**先頭の役割が選ばれた状態**に
+      なり、保存すると黙って役割が変わってしまう。今の値をそのまま選択肢に出して、
       選び直すか解除するかを操作者に決めさせる。
     */
     const known = state.places.some(function (p) { return p.id === selected; });
     const head = (selected && !known)
-      ? '<option value="' + esc(selected) + '" selected>(不明な場所)</option>'
+      ? '<option value="' + esc(selected) + '" selected>(不明な役割)</option>'
       : '';
 
     return head + state.places.filter(function (p) { return p.active || p.id === selected; })
@@ -597,13 +597,13 @@
       }).join('');
   }
 
-  // ------------------------------------------------------- 場所の管理
+  // ------------------------------------------------------- 役割の管理
 
   function openPlacesModal() {
-    openModal('場所の管理',
+    openModal('役割の管理',
       '<p class="formError" hidden></p>' +
       '<ul class="placeList" id="placeList">' + state.places.map(placeRowHtml).join('') + '</ul>' +
-      '<button type="button" class="btn" id="p_add">＋ 場所を追加</button>' +
+      '<button type="button" class="btn" id="p_add">＋ 役割を追加</button>' +
       '<p class="hint">チェックを外すと配置表に表示されなくなります。' +
         '過去の配置表を保つため、行そのものは残ります。</p>' +
       '<p class="hint">色は「役割ごと」の行の背景になります。' +
@@ -659,17 +659,17 @@
   }
 
   /**
-   * 場所1件の編集行。
+   * 役割1件の編集行。
    *
    * 選んだ色は `<li>` の data-color に持つ。**入力欄を増やさない**のは、
-   * 保存時に読む場所を1か所（li）にまとめておくため。
+   * 保存時に読む役割を1か所（li）にまとめておくため。
    */
   function placeRowHtml(p) {
     const color = p.color || '';
     return '<li data-id="' + esc(p.id) + '" data-color="' + esc(color) + '">' +
       '<div class="placeList__main">' +
         '<input type="number" class="order" value="' + Number(p.sort_order || 0) + '" aria-label="表示順">' +
-        '<input type="text" class="name" value="' + esc(p.name) + '" placeholder="場所名" aria-label="場所名">' +
+        '<input type="text" class="name" value="' + esc(p.name) + '" placeholder="役割名" aria-label="役割名">' +
         '<label class="toggle"><input type="checkbox" class="active"' + (p.active ? ' checked' : '') +
           '><span>表示</span></label>' +
       '</div>' +
@@ -716,7 +716,7 @@
 
   function placeNameOf(placeId) {
     const p = state.places.filter(function (x) { return x.id === placeId; })[0];
-    return p ? p.name : '(不明な場所)';
+    return p ? p.name : '(不明な役割)';
   }
 
   /**
@@ -823,7 +823,7 @@
   // ------------------------------------------- 割り当ての編集（既にある帯）
 
   /**
-   * 割り当てのパネル。**場所・時間・メモを直すか、解除するか**の2つだけ。
+   * 割り当てのパネル。**役割・時間・メモを直すか、解除するか**の2つだけ。
    *
    * かつてここは「枠のパネル」で、下半分に候補者の一覧が並んでいた。
    * **枠と割り当てが1対1になったので、人を足すという操作そのものが無くなった。**
@@ -844,7 +844,7 @@
         (isStaff(row.person_id) ? '（職員）' : '') + '</p>' +
       (meta ? '<p class="hint">' + esc(meta) + '</p>' : '') +
       '<p class="hint">' + esc(availabilityLabel(row.person_id)) + '</p>' +
-      '<div class="field"><label for="f_place">場所</label>' +
+      '<div class="field"><label for="f_place">役割</label>' +
         '<select id="f_place">' + placeOptions(row.place_id) + '</select></div>' +
       '<div class="field field--row">' +
         '<div><label>開始</label>' +
@@ -960,7 +960,7 @@
   // -------------------------------------------- 人を入れる（空きをタップ）
 
   /*
-    **これが唯一の割り当て経路。** 場所の空いているところをタップ → 人を選ぶ →
+    **これが唯一の割り当て経路。** 役割の空いているところをタップ → 人を選ぶ →
     時間を決める → 1件の割り当てができる。
 
     順番は「人 → 時間」。先に人を選べば、その人が申告した時間帯をそのまま
@@ -1210,7 +1210,7 @@
   /**
    * 割り当てを1件登録する。
    *
-   * **楽観的更新はしない。** IDがサーバーで決まるうえ、同じ場所・同じ時間の
+   * **楽観的更新はしない。** IDがサーバーで決まるうえ、同じ役割・同じ時間の
    * 重なりはサーバーでしか正しく判定できない。先に画面へ置くと巻き戻しが増える。
    */
   function submitAssign(payload) {

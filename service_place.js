@@ -1,8 +1,8 @@
 /**
- * service_place.gs … 場所の登録・編集
+ * service_place.gs … 役割の登録・編集
  *
  * **かつては service_slot.gs という名前で、枠（slots）の保存・テンプレート展開・
- * 日/週コピーも持っていた。枠の概念を廃止したため、場所だけが残った。**
+ * 日/週コピーも持っていた。枠の概念を廃止したため、役割だけが残った。**
  *
  * 【このファイルの約束】
  *
@@ -15,14 +15,14 @@
  */
 
 // ---------------------------------------------------------------------------
-// 場所
+// 役割
 // ---------------------------------------------------------------------------
 
 /**
- * 場所をまとめて保存する。画面の一覧をそのまま受け取る想定。
+ * 役割をまとめて保存する。画面の一覧をそのまま受け取る想定。
  *
  * **行は消さない。** 廃止は `active=false` で表す（design.md 3 places）。
- * 過去の枠が参照している場所名を消すと、過去の配置表が読めなくなるため。
+ * 過去の枠が参照している役割名を消すと、過去の配置表が読めなくなるため。
  *
  * @param {Array<{id?: string, name: string, sort_order?: number, active?: boolean}>} places
  * @param {string} operator 操作者名（記名）
@@ -38,10 +38,10 @@ function savePlacesData_(places, operator) {
   const cleaned = input.map(function (p, i) {
     const label = (i + 1) + '行目';
     const name = trimStr_(p.name);
-    if (!name) errors.push(label + ': 場所名を入力してください。');
+    if (!name) errors.push(label + ': 役割名を入力してください。');
 
     const id = trimStr_(p.id);
-    if (id && !byId.has(id)) errors.push(label + ': 存在しない場所です（他の端末で削除された可能性があります）。');
+    if (id && !byId.has(id)) errors.push(label + ': 存在しない役割です（他の端末で削除された可能性があります）。');
 
     const order = p.sort_order === '' || p.sort_order === null || p.sort_order === undefined
       ? i + 1
@@ -99,8 +99,8 @@ function savePlacesData_(places, operator) {
 // 共通ヘルパー
 // ---------------------------------------------------------------------------
 
-/** 場所名。places から消えていても「(不明な場所)」で通す（画面から消さないため） */
+/** 役割名。places から消えていても「(不明な役割)」で通す（画面から消さないため） */
 function placeName_(placeById, placeId) {
   const place = placeById.get(trimStr_(placeId));
-  return place ? place.name : '(不明な場所)';
+  return place ? place.name : '(不明な役割)';
 }

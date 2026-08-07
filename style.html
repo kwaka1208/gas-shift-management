@@ -22,7 +22,7 @@
   --res-free-line: #ccd5df;
 
   /*
-    場所（役割）の背景色。**淡い色だけを用意する。**
+    役割の背景色。**淡い色だけを用意する。**
     黒い文字と、この上に重なる割り当ての帯（--slot-bg）が読める濃さに留めること。
     キーの一覧は config.js の PLACE_COLORS、名前は common_script.html の PLACE_COLOR_OPTIONS。
   */
@@ -182,7 +182,7 @@ input[type="date"] {
 
 /*
   左右の余白は .board に持たせる。横スクロールの器（.board__scroll）ごと内側へ寄るため、
-  場所の列の position: sticky は余白の内側の端に貼り付く（見た目が崩れない）。
+  役割の列の position: sticky は余白の内側の端に貼り付く（見た目が崩れない）。
 */
 .board { padding: .5rem var(--gutter) 4rem; }
 
@@ -193,7 +193,7 @@ input[type="date"] {
 
 /*
   min-width: max-content が要点。これが無いと各行の幅がスクロール領域の幅どまりになり、
-  場所の列に position: sticky が効かない（横スクロールで左へ流れてしまう）。
+  役割の列に position: sticky が効かない（横スクロールで左へ流れてしまう）。
   width: 100% は、内容が狭いときに広い画面いっぱいへ広げるため。
 */
 .board__inner {
@@ -203,7 +203,7 @@ input[type="date"] {
 
 .board__axisRow, .board__row { display: flex; align-items: stretch; }
 
-/* 場所の列は横スクロールしても左に貼り付く */
+/* 役割の列は横スクロールしても左に貼り付く */
 .board__place, .board__corner {
   position: sticky;
   left: 0;
@@ -268,9 +268,9 @@ input[type="date"] {
 .board__lanes--assignable { cursor: copy; }
 
 /*
-  場所ごとの背景色（data-color）。
+  役割ごとの背景色（data-color）。
 
-  **場所名の欄とタイムラインの両方に敷く。** 場所名の列は横スクロールしても左に
+  **役割名の欄とタイムラインの両方に敷く。** 役割名の列は横スクロールしても左に
   貼り付くので、片方だけ塗ると、スクロールしたときに色が途切れて見える。
   貼り付く列は下の行が透けてはいけないため、色は不透明のものを使うこと。
 
@@ -395,7 +395,7 @@ input[type="date"] {
 
 .resSummary b { color: var(--fg); font-size: 1rem; }
 
-/* 氏名と時間の2行が入るので、場所の列より広く取る */
+/* 氏名と時間の2行が入るので、役割の列より広く取る */
 #people .board__place,
 #people .board__corner {
   flex-basis: 8rem;
@@ -596,7 +596,7 @@ input[type="date"] {
 .pageFooter__label { margin: 0; }
 .pageFooter__org { margin: .125rem 0 0; }
 
-/* ------------------------------------------------------------ 場所の一覧 */
+/* ------------------------------------------------------------ 役割の一覧 */
 
 .placeList { list-style: none; margin: 0 0 .75rem; padding: 0; }
 

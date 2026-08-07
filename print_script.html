@@ -9,7 +9,7 @@
 
   【ページ分割を JS でやる理由】
   CSS の break-inside / テーブルヘッダーの繰り返しには頼らない。行の高さが段数
-  （同じ場所に重なった割り当ての数）で変わるため、どこで切られるかを予測できず、
+  （同じ役割に重なった割り当ての数）で変わるため、どこで切られるかを予測できず、
   切れた紙の上に時間軸が出ない事故が起きる。**実際に置いて、はみ出したら戻す。**
 
   【横は必ず1枚】
@@ -97,7 +97,7 @@
     layoutSection(ctx, peopleSection(ctx));
   }
 
-  /** 場所ごと（上のページ群）。1行＝1場所 */
+  /** 役割ごと（上のページ群）。1行＝1役割 */
   function placesSection(ctx) {
     const byPlace = {};
     state.assignments.forEach(function (a) {
@@ -109,20 +109,20 @@
 
     return {
       cls: 'sheetPage--places',
-      title: '場所ごと',
-      // places シートから消された場所を指す割り当て。紙の上でも見落とさないようにする
+      title: '役割ごと',
+      // places シートから消された役割を指す割り当て。紙の上でも見落とさないようにする
       warnHtml: orphans.length === 0 ? '' :
-        '<p class="sheetPage__warn">places シートに無い場所を指す割り当てがあります' +
+        '<p class="sheetPage__warn">places シートに無い役割を指す割り当てがあります' +
         '（place_id: ' + orphans.map(esc).join(' / ') + '）。' +
-        '「(不明な場所)」の行に出しています。</p>',
+        '「(不明な役割)」の行に出しています。</p>',
       metaHtml: '<div class="sheetPage__meta">' +
         '<span>表示時間帯 <b>' + esc(tl(state.config.day_start)) + '–' +
           esc(tl(state.config.day_end)) + '</b></span>' +
-        '<span>場所 <b>' + places.length + '</b></span>' +
+        '<span>役割 <b>' + places.length + '</b></span>' +
         '<span>割り当て <b>' + state.assignments.length + '</b>件</span>' +
         '<span>（ ）内は性別・年齢、「職」は職員</span>' +
       '</div>',
-      emptyHtml: '<p class="empty">場所が登録されていません。</p>',
+      emptyHtml: '<p class="empty">役割が登録されていません。</p>',
       rows: places.map(function (p) {
         return placeRowHtml(p, byPlace[p.id] || [], ctx);
       })
@@ -204,7 +204,7 @@
       /*
         1行目からはみ出す場合は諦めてそのまま置く。
         取り除いて次の紙へ回しても、次の紙でも同じことが起きて紙が無限に増える。
-        （段数が極端に多い場所を作ったときにだけ起こりうる）
+        （段数が極端に多い役割を作ったときにだけ起こりうる）
       */
       if (inner.children.length <= 2) return;
 
@@ -230,7 +230,7 @@
     return el.getBoundingClientRect().bottom <= box.bottom - pad;
   }
 
-  /** 「1 / 3」。セクションごとに数える（場所ごと・人ごとを別々に数えたいため） */
+  /** 「1 / 3」。セクションごとに数える（役割ごと・人ごとを別々に数えたいため） */
   function numberPages(pages) {
     pages.forEach(function (p, i) {
       p.querySelector('.sheetPage__no').textContent = (i + 1) + ' / ' + pages.length;
@@ -254,7 +254,7 @@
     出しきれないものは諦める（紙で足りなければ画面を見てもらう）。
   */
 
-  /** 1場所ぶんの行 */
+  /** 1役割ぶんの行 */
   function placeRowHtml(place, rows, ctx) {
     const inRange = [];
     let outCount = 0;
@@ -374,7 +374,7 @@
 
   function placeNameOf(placeId) {
     const p = state.places.filter(function (x) { return x.id === placeId; })[0];
-    return p ? p.name : '(不明な場所)';
+    return p ? p.name : '(不明な役割)';
   }
 
   function dateLabel() {

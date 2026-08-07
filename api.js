@@ -165,7 +165,7 @@ function submitAvailability(token, payload) {
 // ---------------------------------------------------------------------------
 
 /**
- * 割り当てを1件作る。**場所・日付・時間帯・人を決めると1行できる**（design.md 3）。
+ * 割り当てを1件作る。**役割・日付・時間帯・人を決めると1行できる**（design.md 3）。
  *
  * かつては「枠に人を入れる assign」と「枠を作って入れる assignToNewSlot」に
  * 分かれていたが、枠の廃止にともなって1本になった。
@@ -183,7 +183,7 @@ function assign(token, payload) {
 }
 
 /**
- * 既にある割り当ての場所・時間帯・メモを直す。
+ * 既にある割り当ての役割・時間帯・メモを直す。
  * **人は変えない**（替えるときは解除してから入れ直す。service_assign.js 参照）。
  *
  * @param {string} token 閲覧トークン
@@ -214,7 +214,7 @@ function unassign(token, assignmentId) {
 }
 
 /**
- * 場所をまとめて保存する。行は削除せず、廃止は active=false で表す。
+ * 役割をまとめて保存する。行は削除せず、廃止は active=false で表す。
  *
  * @param {string} token 閲覧トークン
  * @param {Array<Object>} places 画面上の一覧そのまま

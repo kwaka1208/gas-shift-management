@@ -5,10 +5,10 @@
  * （移行済みなら何もしない）。
  *
  * 【何をするか】
- *   旧: slots（場所・日付・時間帯）＋ assignments（slot_id・person_id）の2枚
- *   新: assignments 1枚（場所・日付・時間帯・人）
+ *   旧: slots（役割・日付・時間帯）＋ assignments（slot_id・person_id）の2枚
+ *   新: assignments 1枚（役割・日付・時間帯・人）
  *
- *   旧 assignments の各行について、参照先の slot から日付・場所・時間帯・メモを
+ *   旧 assignments の各行について、参照先の slot から日付・役割・時間帯・メモを
  *   引き写して、新しい assignments の1行にする。
  *
  * 【消さないもの】
@@ -181,15 +181,15 @@ function inspectMigrationOrphans() {
   console.log('');
   console.log('【この先どうするか】');
   console.log('・その人の勤務が実際にあったなら、配置表の画面から入れ直してください');
-  console.log('  （新しい形は「場所・日付・時間帯・人」が揃っていないと1行になりません。');
-  console.log('   枠が消えている以上、場所と時間はここからは復元できません）');
+  console.log('  （新しい形は「役割・日付・時間帯・人」が揃っていないと1行になりません。');
+  console.log('   枠が消えている以上、役割と時間はここからは復元できません）');
   console.log('・テスト中に出た行や、消したはずの割り当てなら、そのままで構いません');
   console.log('・元の行は ' + assignOld.getName() + ' に残っています。消さずに置いておけます');
 
-  // 場所が特定できるならヒントを出す（同じ人の同じ日に他の割り当てがあれば参考になる）
+  // 役割が特定できるならヒントを出す（同じ人の同じ日に他の割り当てがあれば参考になる）
   if (placeById.size === 0) {
     console.log('');
-    console.log('※ places シートが空です。先に場所を登録してください。');
+    console.log('※ places シートが空です。先に役割を登録してください。');
   }
 
   return { ok: true, orphans: orphans.length };
