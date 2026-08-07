@@ -26,7 +26,11 @@ const PUBLIC_CONFIG_KEYS_ = [
   CONFIG_KEY.SLOT_UNIT_MINUTES,
   CONFIG_KEY.ENTRY_DEFAULT_START,
   CONFIG_KEY.ENTRY_DEFAULT_END,
-  CONFIG_KEY.PUBLIC_NAME_STYLE
+  CONFIG_KEY.PUBLIC_NAME_STYLE,
+  // 応募フォームに出す運営者名と個人情報の取り扱い。**画面に出すために置いてある**
+  // （config.js CONFIG_DEFAULTS。空にすればその欄ごと出ない）
+  CONFIG_KEY.OPERATOR_NAME,
+  CONFIG_KEY.PRIVACY_NOTE
 ];
 
 // ---------------------------------------------------------------------------

@@ -89,7 +89,13 @@
           （例: 22:00〜26:00 は「夜10時から翌朝2時まで」）</p>
       </div>
 
-      <p class="hint">ご入力いただいた個人情報は、令和8年熊本地震の被災者支援活動およびこれに付随する連絡・手続き以外の目的には使用いたしません。</p>
+      <!--
+        個人情報の取り扱い。**文面はここに書かない。**
+        `_config` の `privacy_note` を entry_script.html が入れる（既定値は config.js）。
+        団体名も活動の名目も現場ごとに違い、運用の途中でも変わるため。
+        空にすると、この段落ごと出ない。
+      -->
+      <p class="hint entryNote" id="privacyNote" hidden></p>
 
       <button type="submit" class="btn btn--primary btn--block" id="submitBtn">この内容で登録する</button>
     </form>
@@ -97,10 +103,13 @@
     <!-- 送信後の控え -->
     <div id="receipt" hidden></div>
 
-    <!-- 運営者。フォームと控えのどちらの状態でも見えるよう form の外に置く -->
-    <footer class="pageFooter">
+    <!--
+      運営者。フォームと控えのどちらの状態でも見えるよう form の外に置く。
+      名前は `_config` の `operator_name`（既定値は config.js）。空なら出ない。
+    -->
+    <footer class="pageFooter" id="operatorFooter" hidden>
       <p class="pageFooter__label">運営者</p>
-      <p class="pageFooter__org">社会福祉法人　八代ナザレ園</p>
+      <p class="pageFooter__org" id="operatorName"></p>
     </footer>
   </div>
 

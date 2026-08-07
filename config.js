@@ -239,7 +239,25 @@ const CONFIG_DEFAULTS = {
   // （service_board.js `appendStaffDefaultAvailability_`）
   staff_default_start: '10:00',
   staff_default_end: '17:00',
-  public_name_style: 'full'
+  public_name_style: 'full',
+
+  /*
+    応募フォームに出す運営者名と、個人情報の取り扱いの説明。
+
+    **画面（entry.html）に直接書かないこと。** ここに置いてある理由は2つ。
+      - 団体名も活動の名目も、このツールを使う現場ごとに違う
+      - 文面は運用の途中で変わる（活動の名称が変わる、範囲を書き足す）。
+        そのたびにコードを直してデプロイし直すのは現実的でない
+
+    **どちらも空にできる。** 空にした欄は画面に出ない（見出しだけが残らない）。
+    改行はそのまま改行として表示される（style.html `.pageFooter__org` /
+    `.entryNote` の white-space）。
+
+    ここに書いてあるのは**既定値**で、`_config` シートで書き換えられる。
+    書き換えたら、このファイルを直す必要は無い。
+  */
+  operator_name: '社会福祉法人　八代ナザレ園',
+  privacy_note: 'ご入力いただいた個人情報は、令和8年熊本地震の被災者支援活動およびこれに付随する連絡・手続き以外の目的には使用いたしません。'
 };
 
 /** `_config` のキー名 */
@@ -253,7 +271,9 @@ const CONFIG_KEY = {
   ENTRY_DEFAULT_END: 'entry_default_end',
   STAFF_DEFAULT_START: 'staff_default_start',
   STAFF_DEFAULT_END: 'staff_default_end',
-  PUBLIC_NAME_STYLE: 'public_name_style'
+  PUBLIC_NAME_STYLE: 'public_name_style',
+  OPERATOR_NAME: 'operator_name',
+  PRIVACY_NOTE: 'privacy_note'
 };
 
 /**

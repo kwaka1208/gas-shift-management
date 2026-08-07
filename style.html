@@ -594,6 +594,15 @@ input[type="date"] {
 }
 
 .pageFooter__label { margin: 0; }
+
+/*
+  運営者名と個人情報の取り扱いは `_config` から入る（config.js CONFIG_DEFAULTS）。
+  **設定に書いた改行をそのまま改行として出す。** 住所や連絡先を続けて書いたり、
+  取り扱いの説明を数行に分けたりできるようにするため。
+*/
+.pageFooter__org,
+.entryNote { white-space: pre-line; }
+
 .pageFooter__org { margin: .125rem 0 0; }
 
 /* ------------------------------------------------------------ 役割の一覧 */

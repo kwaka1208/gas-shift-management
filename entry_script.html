@@ -33,6 +33,7 @@
       setupGenderOptions();
       setupProxyFields();
       setupKanaAutoFill();
+      setupOperatorText();
       addDayBlock(BOOT.date || App.todayStr());
       $('loading').hidden = true;
       $('entryForm').hidden = false;
@@ -53,6 +54,29 @@
       App.GENDER_OPTIONS.map(function (o) {
         return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>';
       }).join('');
+  }
+
+  /**
+   * 運営者名と個人情報の取り扱いを入れる（`_config` の `operator_name` / `privacy_note`）。
+   *
+   * **画面に文面を直接書かない。** 団体名も活動の名目も現場ごとに違い、
+   * 運用の途中でも変わる。変えるたびにデプロイし直さずに済むよう、設定から取る。
+   *
+   * **必ず textContent で入れること。** 値はシートから来るので、
+   * innerHTML で入れるとシートに書いたタグがそのまま効いてしまう。
+   * 改行は CSS（`.entryNote` / `.pageFooter__org` の white-space）が保つ。
+   *
+   * 空のときは**欄ごと出さない。** 見出しの「運営者」だけが残ると、
+   * 設定し忘れなのか、そもそも書かない運用なのかが読む人に分からない。
+   */
+  function setupOperatorText() {
+    const note = String(state.config.privacy_note || '').trim();
+    $('privacyNote').textContent = note;
+    $('privacyNote').hidden = note === '';
+
+    const operator = String(state.config.operator_name || '').trim();
+    $('operatorName').textContent = operator;
+    $('operatorFooter').hidden = operator === '';
   }
 
   /**
