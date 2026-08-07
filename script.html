@@ -63,6 +63,8 @@
   // ------------------------------------------------------------ モーダル
 
   function openModal(title, bodyHtml) {
+    // モーダルの下に吹き出しが残らないようにする（帯を触った指のまま開くため）
+    Tooltip.hide();
     $('modalTitle').textContent = title;
     $('modalBody').innerHTML = bodyHtml;
     $('modal').hidden = false;
@@ -94,6 +96,122 @@
     state.busy = on;
     document.querySelectorAll('#modalBody button').forEach(function (b) { b.disabled = on; });
   }
+
+  // ------------------------------------------------------------ ホバー詳細
+
+  /*
+    帯（.slot / .res__busy）にマウスを合わせたときに出す詳細。
+
+    **中身は data-tip 属性に入れてある。** 組み立てているのは assignmentTooltip()。
+    ブラウザ標準の title 属性からここへ移したのは、title だと表示まで1〜2秒待たされ、
+    狭くて `…` に切れた帯を確かめたいときに間に合わないため。
+    **title と併用しないこと。** 標準の吹き出しも重なって二重に出る。
+
+    **ここにしか無い情報を置いてはいけない。** スマホにはホバーが無く、
+    この経路そのものが存在しない（下の hoverable）。帯が狭くて切れた文字を
+    そのまま読める形で補う、という役目にとどめる。
+  */
+  const Tooltip = (function () {
+    /*
+      タッチ端末では、タップの直前に mouseover が発火する。そのまま出すと
+      触ってもいない帯の詳細が画面に残り続けるため、**登録そのものをしない。**
+    */
+    const hoverable = !!(window.matchMedia && window.matchMedia('(hover: hover)').matches);
+
+    let el = null;
+    let current = null;
+
+    function ensure() {
+      if (el) return el;
+      el = document.createElement('div');
+      el.className = 'tip';
+      el.hidden = true;
+      document.body.appendChild(el);
+      return el;
+    }
+
+    /*
+      1行目を見出し（役割と時刻）、`⚠` で始まる行を警告として色を変える。
+      assignmentTooltip() の戻り値を改行区切りの文字列のままにしてあるのは、
+      人ごとの帯が「…＋ '\n⚠ 申告された時間の外です'」と足して使うため。
+    */
+    function render(text) {
+      return String(text).split('\n')
+        .filter(function (line) { return line !== ''; })
+        .map(function (line, i) {
+          const cls = i === 0 ? 'tip__head'
+            : (line.charAt(0) === '⚠' ? 'tip__warn' : 'tip__line');
+          return '<span class="' + cls + '">' + esc(line) + '</span>';
+        }).join('');
+    }
+
+    function show(target) {
+      const text = target.dataset.tip;
+      if (!text) return;
+      current = target;
+      const box = ensure();
+      box.innerHTML = render(text);
+      box.hidden = false;
+      place(target, box);
+    }
+
+    /*
+      帯の真上に出す。**画面からはみ出すときは向きと位置を変える。**
+      配置表は横スクロールするため、端の帯では素直に置くと画面外へ出てしまう。
+    */
+    function place(target, box) {
+      const r = target.getBoundingClientRect();
+      const w = box.offsetWidth;
+      const h = box.offsetHeight;
+      const gap = 6;
+      const margin = 8;
+
+      let left = r.left + r.width / 2 - w / 2;
+      left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
+
+      // 上に入らなければ下へ回す
+      let top = r.top - h - gap;
+      if (top < margin) top = Math.min(r.bottom + gap, window.innerHeight - h - margin);
+
+      box.style.left = left + 'px';
+      box.style.top = top + 'px';
+    }
+
+    function hide() {
+      current = null;
+      if (!el) return;
+      el.hidden = true;
+      el.innerHTML = '';
+    }
+
+    /**
+     * #board / #people は innerHTML を入れ替えても要素そのものは残るので、
+     * **委譲で1回だけ登録すればよい。** 帯ごとに付けると再描画のたびに増える。
+     */
+    function attach(container) {
+      if (!hoverable || !container) return;
+
+      container.addEventListener('mouseover', function (e) {
+        const t = e.target.closest('[data-tip]');
+        if (t && t !== current) show(t);
+      });
+
+      container.addEventListener('mouseout', function (e) {
+        // 帯の内側（時刻・氏名の span）へ移っただけのときは消さない
+        const t = e.target.closest('[data-tip]');
+        if (t && t === current && !t.contains(e.relatedTarget)) hide();
+      });
+
+      // 管理URLでは帯が button なので、キーボードでも辿れる
+      container.addEventListener('focusin', function (e) {
+        const t = e.target.closest('[data-tip]');
+        if (t) show(t);
+      });
+      container.addEventListener('focusout', hide);
+    }
+
+    return { attach: attach, hide: hide };
+  })();
 
   // ------------------------------------------------------------ 起動
 
@@ -139,6 +257,8 @@
 
   /** 指定日を読み込み直す */
   function loadDay(date) {
+    // 消える帯を指したまま吹き出しが残らないようにする
+    Tooltip.hide();
     $('loading').textContent = '読み込んでいます…';
     $('loading').hidden = false;
     $('sections').hidden = true;
@@ -376,7 +496,7 @@
         ' class="res__busy' + (outside ? ' res__busy--warn' : '') +
           (state.adminMode ? ' res__busy--tappable' : '') + '"' +
         ' style="left:' + box.left + '%;width:' + box.width + '%"' +
-        ' title="' + esc(tip) + '"' +
+        ' data-tip="' + esc(tip) + '"' +
         (state.adminMode && !carried
           ? ' data-unassign="' + esc(b.assignmentId) + '"' +
             ' data-who="' + esc(person.name) + '" data-what="' + esc(label) + '"'
@@ -466,13 +586,16 @@
   }
 
   /**
-   * ホバーで出す詳細（`title` 属性）。
+   * ホバーで出す詳細の中身（`data-tip` 属性に入れ、Tooltip が描く）。
    *
    * 帯は狭いと `…` で切れるうえ、性別・年齢は短縮形（`女42`）にしている。
    * **切れて読めなかったものを、そのまま読める形で補うのがここの役目。**
    * タップできない閲覧URLでも中身を確かめられる。
    *
-   * `title` は改行を扱えるので、1項目1行で並べる。
+   * **戻り値は改行区切りの1文字列にしておく。** 人ごとの帯が
+   * 「⚠ 申告された時間の外です」を足して使うため（renderPersonRow）。
+   * 1行目は見出しとして太字になるので、役割と時刻を先頭に置く。
+   *
    * スマホにはホバーが無いため、**ここにしか無い情報を置いてはいけない。**
    */
   function assignmentTooltip(row) {
@@ -533,7 +656,7 @@
         (carried ? ' slot--carried' : '') + '"' +
       ' data-id="' + esc(row.id) + '"' +
       (carried ? ' data-carried="' + esc(row.carried_from) + '"' : '') +
-      ' title="' + esc(assignmentTooltip(row)) + '"' +
+      ' data-tip="' + esc(assignmentTooltip(row)) + '"' +
       ' style="left:' + left + '%;width:' + width + '%;top:' + top + '">' +
       '<span class="slot__time">' + (carried ? '前日から ' : '') +
         esc(tl(row.start_time)) + '–' + esc(tl(row.end_time)) + '</span>' +
@@ -1227,6 +1350,22 @@
   }
 
   // ------------------------------------------------------------ イベント
+
+  /*
+    ホバー詳細は #board / #people に委譲で1回だけ登録する。
+    どちらも innerHTML を入れ替えるだけで要素そのものは残るため、
+    再描画のたびに登録し直す必要は無い。
+  */
+  Tooltip.attach($('board'));
+  Tooltip.attach($('people'));
+
+  /*
+    吹き出しは position: fixed で画面に固定して出す。スクロールすると
+    帯だけが動いて位置がずれるので消す。配置表は横スクロールするため、
+    内側のスクロールも拾えるよう capture で受ける。
+  */
+  window.addEventListener('scroll', Tooltip.hide, true);
+  window.addEventListener('resize', Tooltip.hide);
 
   $('prevDay').addEventListener('click', function () { loadDay(addDays(state.date, -1)); });
   $('nextDay').addEventListener('click', function () { loadDay(addDays(state.date, 1)); });

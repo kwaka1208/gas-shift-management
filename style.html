@@ -944,6 +944,42 @@ input[type="date"] {
 
 .receipt__actions .btn { flex: 1 1 9rem; }
 
+/* ------------------------------------------------------------- ホバー詳細 */
+
+/*
+  帯（.slot / .res__busy）のホバー詳細。組み立ては script.html の Tooltip。
+
+  **body 直下に1つだけ置き、position: fixed で画面基準に出す。**
+  帯は .board__scroll の中にあり、そこで absolute にすると横スクロールの
+  内側に閉じ込められて、右端の帯では吹き出しが見切れる。
+
+  スマホには出ない（ホバーが無い端末では登録自体をしていない）。
+*/
+.tip {
+  position: fixed;
+  z-index: 55;  /* モーダル(50)より上、トースト(60)より下 */
+  max-width: min(24rem, calc(100vw - 1rem));
+  padding: .5rem .625rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: .8125rem;
+  line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
+  /* 吹き出し自身がホバーを奪うと、出た瞬間に mouseout して消える */
+  pointer-events: none;
+}
+
+.tip__head,
+.tip__line,
+.tip__warn { display: block; }
+
+/* 1行目（役割と時刻）。帯で切れていても、まずここで何の割り当てかが分かる */
+.tip__head { font-weight: 600; }
+.tip__line { color: var(--fg-weak); }
+.tip__warn { color: var(--danger); font-weight: 600; }
+
 /* ------------------------------------------------------------------ トースト */
 
 .toast {
